@@ -12,8 +12,15 @@ struct EditorHeader: View {
     let path: String
     @Binding var mode: EditorMode
 
+    @AppStorage("filesPanelVisible") private var panelVisible = true
+
     var body: some View {
         HStack(spacing: 10) {
+            if !panelVisible {
+                FilesPanelButton()
+                    .padding(.trailing, 4)
+            }
+
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
                     .font(.system(size: 14, weight: .semibold))
@@ -49,7 +56,7 @@ struct EditorHeader: View {
                 .disabled(true)
                 .help("PDF updates come in the Export phase")
         }
-        .padding(.leading, 20)
+        .padding(.leading, panelVisible ? 20 : 14)
         .padding(.trailing, 16)
         .frame(height: 48)
     }

@@ -3,8 +3,9 @@ import SwiftUI
 struct IconRail: View {
 
     @Environment(VaultSession.self) private var vault
-    @Environment(\.openSettings) private var openSettings
     @Binding var selection: AppSection
+    var topInset: CGFloat = Theme.titleBarInset
+    var width: CGFloat = Theme.railWidth
 
     private var isUnlocked: Bool {
         vault.state == .unlocked
@@ -12,13 +13,6 @@ struct IconRail: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            Image("RailLogo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 44, height: 44)
-                .padding(.bottom, 6)
-                .accessibilityLabel("MSN Milestone Suit")
-
             RailButton(section: .files, selection: $selection)
             RailDots()
 
@@ -38,15 +32,12 @@ struct IconRail: View {
                     selection = .secrets
                 }
             }
-            RailActionButton(symbol: "gearshape", title: "Settings") {
-                openSettings()
-            }
         }
-        .padding(.top, Theme.titleBarInset)
+        .padding(.top, topInset)
         .padding(.bottom, 14)
-        .frame(width: Theme.railWidth)
+        .frame(width: width)
         .frame(maxHeight: .infinity)
-        .background(.background.secondary)
+        .background(Theme.surface)
     }
 }
 
