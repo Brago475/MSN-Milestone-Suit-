@@ -8,6 +8,7 @@ struct LockedView: View {
     @State private var password = ""
     @State private var isWorking = false
     @State private var errorText: String?
+    @State private var showReset = false
 
     var body: some View {
         VStack(spacing: 18) {
@@ -65,6 +66,11 @@ struct LockedView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(.red)
                 }
+                Button("Forgot password?") {
+                    showReset = true
+                }
+                .buttonStyle(.link)
+                .font(.system(size: 12))
             }
             .frame(width: 300)
 
@@ -75,6 +81,9 @@ struct LockedView: View {
         .padding(.bottom, 60)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
+        .sheet(isPresented: $showReset) {
+            RecoveryResetSheet()
+        }
     }
 
     private func unlockWithPassword() async {
