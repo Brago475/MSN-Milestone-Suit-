@@ -29,6 +29,7 @@ enum VaultSelfTest {
         runCryptoChecks()
         runStoreChecks()
         runRecoveryChecks()
+        runBiometricChecks()
         print("Vault self-test: \(passed) passed, \(failed) failed")
     }
 
@@ -129,6 +130,32 @@ enum VaultSelfTest {
         } catch {
             failed += 1
             print("  FAIL  unexpected recovery error: \(error)")
+        }
+    }
+
+    // MARK: Touch ID (save and remove only, no prompt)
+
+    private static func runBiometricChecks() {
+        guard BiometricUnlock.isAvailable else {
+            print("  SKIP  Touch ID is not set up on this Mac")
+            return
+        }
+
+        let account = "self-test"
+        BiometricUnlock.disable(account: account)
+
+        do {
+            try BiometricUnlock.enable(vaultKey: VaultCrypto.newVaultKey(), account: account)
+            check("Touch ID copy is saved", BiometricUnlock.isEnabled(account: account))
+
+            BiometricUnlock.disable(account: account)
+            check("Touch ID copy is removed", !BiometricUnlock.isEnabled(account: account))
+        } catch BiometricUnlock.BiometricError.keychain(let status) {
+            failed += 1
+            print("  FAIL  Keychain error \(status)")
+        } catch {
+            failed += 1
+            print("  FAIL  unexpected Touch ID error: \(error)")
         }
     }
 }
