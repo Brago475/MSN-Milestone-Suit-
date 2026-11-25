@@ -8,6 +8,8 @@ struct VaultStore {
         case alreadyExists
         case notFound
         case wrongPassword
+        case wrongRecoveryKey
+        case noRecoveryKey
         case unsupportedVersion
     }
 
@@ -50,7 +52,7 @@ struct VaultStore {
         try data.write(to: fileURL, options: .atomic)
     }
 
-    // MARK: Vault actions
+    // MARK: Password
 
     /// Creates a new vault and returns its unlocked key.
     func create(password: String) throws -> SymmetricKey {
@@ -92,18 +94,62 @@ struct VaultStore {
     /// Re-locks the vault key with a new password. Stored files are not changed.
     func changePassword(from oldPassword: String, to newPassword: String) throws {
         let vaultKey = try unlock(password: oldPassword)
-        var header = try load()
+        try setPassword(newPassword, for: vaultKey)
+    }
 
+    private func setPassword(_ password: String, for vaultKey: SymmetricKey) throws {
+        var header = try load()
         let salt = try VaultCrypto.newSalt()
         let passwordKey = try VaultCrypto.deriveKey(
-            password: newPassword,
+            password: password,
             salt: salt,
             iterations: VaultCrypto.defaultIterations
         )
-
         header.salt = salt
         header.iterations = VaultCrypto.defaultIterations
         header.passwordWrappedKey = try VaultCrypto.wrap(vaultKey, with: passwordKey)
         try save(header)
+    }
+
+    // MARK: Recovery key
+
+    var hasRecoveryKey: Bool {
+        (try? load().recoveryWrappedKey) != nil
+    }
+
+    /// Creates a new recovery key for an unlocked vault. Any old recovery key stops working.
+    func makeRecoveryKey(for vaultKey: SymmetricKey) throws -> String {
+        let display = try RecoveryKey.generate()
+        guard let plain = RecoveryKey.normalize(display) else { throw VaultError.wrongRecoveryKey }
+
+        var header = try load()
+        let salt = try VaultCrypto.newSalt()
+        let recoveryKey = try VaultCrypto.deriveKey(password: plain, salt: salt, iterations: header.iterations)
+        header.recoverySalt = salt
+        header.recoveryWrappedKey = try VaultCrypto.wrap(vaultKey, with: recoveryKey)
+        try save(header)
+        return display
+    }
+
+    /// Returns the vault key if the recovery key is correct.
+    func unlock(recoveryKey input: String) throws -> SymmetricKey {
+        let header = try load()
+        guard let salt = header.recoverySalt, let wrapped = header.recoveryWrappedKey else {
+            throw VaultError.noRecoveryKey
+        }
+        guard let plain = RecoveryKey.normalize(input) else { throw VaultError.wrongRecoveryKey }
+
+        let recoveryKey = try VaultCrypto.deriveKey(password: plain, salt: salt, iterations: header.iterations)
+        do {
+            return try VaultCrypto.unwrap(wrapped, with: recoveryKey)
+        } catch {
+            throw VaultError.wrongRecoveryKey
+        }
+    }
+
+    /// Sets a new password using the recovery key. Stored files are not changed.
+    func resetPassword(recoveryKey: String, newPassword: String) throws {
+        let vaultKey = try unlock(recoveryKey: recoveryKey)
+        try setPassword(newPassword, for: vaultKey)
     }
 }

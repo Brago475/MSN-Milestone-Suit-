@@ -28,6 +28,7 @@ enum VaultSelfTest {
         print("Vault self-test: starting")
         runCryptoChecks()
         runStoreChecks()
+        runRecoveryChecks()
         print("Vault self-test: \(passed) passed, \(failed) failed")
     }
 
@@ -68,11 +69,15 @@ enum VaultSelfTest {
 
     // MARK: Store
 
-    private static func runStoreChecks() {
-        let tempDir = FileManager.default.temporaryDirectory
+    private static func makeTempStore() -> VaultStore {
+        let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("MSNVaultTest-\(UUID().uuidString)", isDirectory: true)
-        let store = VaultStore(directory: tempDir)
-        defer { try? FileManager.default.removeItem(at: tempDir) }
+        return VaultStore(directory: dir)
+    }
+
+    private static func runStoreChecks() {
+        let store = makeTempStore()
+        defer { try? FileManager.default.removeItem(at: store.directory) }
 
         do {
             let created = try store.create(password: "first pass")
@@ -89,6 +94,41 @@ enum VaultSelfTest {
         } catch {
             failed += 1
             print("  FAIL  unexpected store error: \(error)")
+        }
+    }
+
+    // MARK: Recovery key
+
+    private static func runRecoveryChecks() {
+        let store = makeTempStore()
+        defer { try? FileManager.default.removeItem(at: store.directory) }
+
+        do {
+            let sample = try RecoveryKey.generate()
+            let groups = sample.split(separator: "-")
+            check("recovery key has 6 groups of 4",
+                  groups.count == 6 && groups.allSatisfy { $0.count == 4 })
+            print("  INFO  sample recovery key \(sample)")
+
+            let vaultKey = try store.create(password: "my pass")
+            let recovery = try store.makeRecoveryKey(for: vaultKey)
+
+            let viaRecovery = try store.unlock(recoveryKey: recovery)
+            check("recovery key unlocks the vault key", bytes(viaRecovery) == bytes(vaultKey))
+
+            let typed = recovery.lowercased().replacingOccurrences(of: "-", with: " ")
+            let viaTyped = try store.unlock(recoveryKey: typed)
+            check("recovery key accepts lowercase and spaces", bytes(viaTyped) == bytes(vaultKey))
+
+            let wrongRecovery = try RecoveryKey.generate()
+            check("wrong recovery key is rejected", (try? store.unlock(recoveryKey: wrongRecovery)) == nil)
+
+            try store.resetPassword(recoveryKey: recovery, newPassword: "fresh pass")
+            let afterReset = try store.unlock(password: "fresh pass")
+            check("recovery key resets the password", bytes(afterReset) == bytes(vaultKey))
+        } catch {
+            failed += 1
+            print("  FAIL  unexpected recovery error: \(error)")
         }
     }
 }
