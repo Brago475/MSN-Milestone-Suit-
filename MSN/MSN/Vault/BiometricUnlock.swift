@@ -13,8 +13,8 @@ enum BiometricUnlock {
         case invalidData
     }
 
-    static let service = "com.thetcwstudio.MSN.vault"
-    static let defaultAccount = "vault-key"
+    nonisolated static let service = "com.thetcwstudio.MSN.vault"
+    nonisolated static let defaultAccount = "vault-key"
 
     /// True when this Mac has Touch ID set up.
     static var isAvailable: Bool {

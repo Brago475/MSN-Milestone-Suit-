@@ -3,6 +3,8 @@ import SwiftUI
 @main
 struct MSNApp: App {
 
+    @State private var vault = VaultSession()
+
     init() {
         #if DEBUG
         VaultSelfTest.run()
@@ -12,6 +14,7 @@ struct MSNApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environment(vault)
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1280, height: 820)
