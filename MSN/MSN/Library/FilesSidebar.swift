@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The Files sidebar: header actions, search, and the folder tree.
+/// The Files sidebar: header actions, search, and the folder tree with drag and drop.
 struct FilesSidebar: View {
 
     @Environment(LibraryStore.self) private var library
@@ -11,7 +11,10 @@ struct FilesSidebar: View {
     @State private var renameText = ""
     @State private var showRename = false
     @State private var trashURL: URL?
+    @State private var dropTarget: String?
     @FocusState private var searchFocused: Bool
+
+    private static let rootTarget = "vault-root"
 
     private var rows: [TreeRow] {
         library.visibleRows(matching: matches)
@@ -33,6 +36,9 @@ struct FilesSidebar: View {
             try? await Task.sleep(for: .milliseconds(200))
             guard !Task.isCancelled else { return }
             matches = library.matches(for: query)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .msnFocusSearch)) { _ in
+            searchFocused = true
         }
         .alert("Rename", isPresented: $showRename) {
             TextField("Name", text: $renameText)
@@ -164,14 +170,24 @@ struct FilesSidebar: View {
                     FileRowView(
                         row: row,
                         isSelected: library.selection == row.node.id,
-                        isExpanded: matches != nil || library.expanded.contains(row.node.id)
+                        isExpanded: matches != nil || library.expanded.contains(row.node.id),
+                        isDropTarget: dropTarget == row.node.id
                     )
                     .onTapGesture { select(row.node) }
                     .contextMenu { menu(for: row.node) }
+                    .draggable(row.node.url) {
+                        Label(row.node.name, systemImage: row.node.symbol)
+                            .padding(6)
+                    }
+                    .dropDestination(for: URL.self) { urls, _ in
+                        handleDrop(urls, into: folder(for: row.node))
+                    } isTargeted: { targeted in
+                        setDropTarget(targeted ? row.node.id : nil, from: row.node.id)
+                    }
                 }
 
                 if rows.isEmpty {
-                    Text(matches == nil ? "This folder is empty. Use the new file button to start." : "No matches.")
+                    Text(matches == nil ? "This vault is empty. Create a file or drop Markdown files here." : "No matches.")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 10)
@@ -179,7 +195,22 @@ struct FilesSidebar: View {
                 }
             }
             .padding(.horizontal, 8)
-            .padding(.bottom, 12)
+            .padding(.bottom, 40)
+            .frame(maxWidth: .infinity, minHeight: 200, alignment: .top)
+        }
+        .overlay {
+            if dropTarget == Self.rootTarget {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Theme.accent, lineWidth: 2)
+                    .padding(4)
+                    .allowsHitTesting(false)
+            }
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            guard let root = library.rootURL else { return false }
+            return handleDrop(urls, into: root)
+        } isTargeted: { targeted in
+            setDropTarget(targeted ? Self.rootTarget : nil, from: Self.rootTarget)
         }
         .contextMenu { menu(for: nil) }
         .onDeleteCommand {
@@ -189,7 +220,7 @@ struct FilesSidebar: View {
 
     @ViewBuilder
     private func menu(for node: FileNode?) -> some View {
-        let folder = node.map { $0.isFolder ? $0.url : $0.url.deletingLastPathComponent() } ?? library.rootURL
+        let folder = node.map { folder(for: $0) } ?? library.rootURL
         Button("New File") { newFile(in: folder) }
         Button("New Folder") { newFolder(in: folder) }
         if let node {
@@ -199,6 +230,44 @@ struct FilesSidebar: View {
             Divider()
             Button("Move to Trash", role: .destructive) { trashURL = node.url }
         }
+    }
+
+    // MARK: Drag and drop
+
+    /// Folders take drops directly. Files pass the drop to their own folder.
+    private func folder(for node: FileNode) -> URL {
+        node.isFolder ? node.url : node.url.deletingLastPathComponent()
+    }
+
+    private func setDropTarget(_ target: String?, from source: String) {
+        if let target {
+            dropTarget = target
+        } else if dropTarget == source {
+            dropTarget = nil
+        }
+    }
+
+    /// Moves vault items and copies outside items into the folder.
+    @discardableResult
+    private func handleDrop(_ urls: [URL], into folder: URL) -> Bool {
+        dropTarget = nil
+        let inside = urls.filter { library.isInsideVault($0) }
+        let outside = urls.filter { !library.isInsideVault($0) }
+
+        perform {
+            for url in inside {
+                let moved = try library.move(url, into: folder)
+                library.selection = moved.fileKey
+            }
+        }
+
+        if !outside.isEmpty {
+            let result = library.importItems(outside, into: folder)
+            if result.skipped > 0 {
+                library.lastError = "\(result.imported) added. \(result.skipped) skipped. MSN adds Markdown, text and PDF files, and folders."
+            }
+        }
+        return !urls.isEmpty
     }
 
     // MARK: Actions
@@ -252,14 +321,23 @@ struct FileRowView: View {
     let row: TreeRow
     let isSelected: Bool
     let isExpanded: Bool
+    let isDropTarget: Bool
 
     private var node: FileNode { row.node }
 
     var body: some View {
-        if row.depth == 0 && node.isFolder {
-            sectionHeader
-        } else {
-            itemRow
+        Group {
+            if row.depth == 0 && node.isFolder {
+                sectionHeader
+            } else {
+                itemRow
+            }
+        }
+        .overlay {
+            if isDropTarget {
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Theme.accent, lineWidth: 1.5)
+            }
         }
     }
 
@@ -283,7 +361,7 @@ struct FileRowView: View {
         .padding(.horizontal, 10)
         .frame(height: 30)
         .background(
-            isSelected ? Theme.accent.opacity(0.12) : Color.clear,
+            isSelected || isDropTarget ? Theme.accent.opacity(0.12) : Color.clear,
             in: RoundedRectangle(cornerRadius: 6)
         )
         .contentShape(Rectangle())
@@ -316,7 +394,7 @@ struct FileRowView: View {
         .padding(.trailing, 10)
         .frame(height: 28)
         .background(
-            filled ? Theme.accent : (isSelected ? Theme.accent.opacity(0.12) : Color.clear),
+            filled ? Theme.accent : (isSelected || isDropTarget ? Theme.accent.opacity(0.12) : Color.clear),
             in: RoundedRectangle(cornerRadius: 6)
         )
         .overlay(alignment: .leading) {

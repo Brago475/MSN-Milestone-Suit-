@@ -1,17 +1,22 @@
 import SwiftUI
 
-/// Word count and save status under the editor.
+/// Pages, word count, save status and view name under the editor.
 struct EditorStatusBar: View {
 
     let document: MarkdownDocument
+    let mode: EditorMode
+    let pageCount: Int
 
     var body: some View {
         HStack(spacing: 18) {
+            if mode == .page {
+                Text(pageCount == 1 ? "1 page" : "\(pageCount) pages")
+            }
             Text("\(document.wordCount) words")
             Text("\(document.characterCount) characters")
             saveLabel
             Spacer()
-            Text("Markdown")
+            Text(mode == .page ? "Page view" : "Markdown")
         }
         .font(.system(size: 11))
         .foregroundStyle(.secondary)

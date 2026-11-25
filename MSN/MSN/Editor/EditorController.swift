@@ -1,9 +1,10 @@
 import AppKit
 import Observation
 
-/// Line styles offered in the toolbar.
+/// Paragraph styles offered in the toolbar.
 enum TextStyle: String, CaseIterable, Identifiable {
     case normal = "Normal text"
+    case title = "Title"
     case heading1 = "Heading 1"
     case heading2 = "Heading 2"
     case heading3 = "Heading 3"
@@ -14,7 +15,7 @@ enum TextStyle: String, CaseIterable, Identifiable {
     var prefix: String {
         switch self {
         case .normal: ""
-        case .heading1: "# "
+        case .title, .heading1: "# "
         case .heading2: "## "
         case .heading3: "### "
         case .quote: "> "
@@ -28,13 +29,19 @@ enum ListKind {
     case checklist
 }
 
-/// Formatting commands for the Markdown text view.
+/// Formatting commands for Markdown mode. Inserts Markdown syntax as text.
 @MainActor
 @Observable
-final class EditorController {
+final class EditorController: EditorCommands {
 
     @ObservationIgnored weak var textView: NSTextView?
     private(set) var currentStyle: TextStyle = .normal
+
+    var isRichText: Bool { false }
+    var currentFont: PageFont { .menlo }
+    var currentSize: Double { 0 }
+    var currentAlignment: PageAlignment { .left }
+    var currentSpacing: Double { PageStyle.defaultSpacing }
 
     private static let stylePrefix = try! NSRegularExpression(pattern: #"^(#{1,6}[ \t]+|>[ \t]?)"#)
     private static let listPrefix = try! NSRegularExpression(pattern: #"^([ \t]*)([-*+][ \t]\[[ xX]\][ \t]|[-*+][ \t]|\d+\.[ \t])"#)
@@ -50,6 +57,22 @@ final class EditorController {
     }
 
     // MARK: Inline
+
+    func toggleBold() { toggleWrap("**", placeholder: "bold text") }
+    func toggleItalic() { toggleWrap("*", placeholder: "italic text") }
+    func toggleUnderline() { toggleWrap("<u>", "</u>", placeholder: "underlined text") }
+    func toggleStrike() { toggleWrap("~~", placeholder: "text") }
+
+    // Rich formatting is only available in Page view.
+    func setFont(_ font: PageFont) {}
+    func setSize(_ size: Double) {}
+    func stepSize(_ delta: Double) {}
+    func setTextColor(_ hex: String?) {}
+    func setHighlight(_ hex: String?) {}
+    func clearFormatting() {}
+    func setAlignment(_ alignment: PageAlignment) {}
+    func setLineSpacing(_ spacing: Double) {}
+    func indent(_ delta: Int) {}
 
     /// Wraps the selection, or removes the wrap if it is already there.
     func toggleWrap(_ open: String, _ close: String? = nil, placeholder: String) {
@@ -96,10 +119,7 @@ final class EditorController {
         transformLines { lines in
             lines.map { line in
                 let stripped = Self.removing(Self.stylePrefix, from: line)
-                if style == .normal || stripped.isEmpty && style != .normal && line.isEmpty {
-                    return stripped
-                }
-                return style.prefix + stripped
+                return style == .normal ? stripped : style.prefix + stripped
             }
         }
         updateCurrentStyle()

@@ -16,6 +16,7 @@ final class LibraryStore {
         case invalidName
         case nameTaken
         case folderExists
+        case invalidMove
         case missing
         case noLibrary
 
@@ -24,6 +25,7 @@ final class LibraryStore {
             case .invalidName: "Names can't be empty, start with a period, or contain / or :."
             case .nameTaken: "An item with that name already exists in this folder."
             case .folderExists: "A folder with that name already exists in this location."
+            case .invalidMove: "A folder can't be moved into itself."
             case .missing: "This vault's folder can't be found."
             case .noLibrary: "No vault is open."
             }
@@ -60,6 +62,12 @@ final class LibraryStore {
         guard let rootURL else { return nil }
         guard let node = selectedNode else { return rootURL }
         return node.isFolder ? node.url : node.url.deletingLastPathComponent()
+    }
+
+    /// True when the URL is inside the open vault.
+    func isInsideVault(_ url: URL) -> Bool {
+        guard let rootKey = rootURL?.fileKey else { return false }
+        return url.fileKey.hasPrefix(rootKey + "/")
     }
 
     // MARK: Vaults
@@ -317,18 +325,73 @@ final class LibraryStore {
         }
 
         try fileManager.moveItem(at: url, to: target)
-
-        let oldKey = url.fileKey
-        let newKey = target.fileKey
-        func remap(_ key: String) -> String {
-            if key == oldKey { return newKey }
-            if key.hasPrefix(oldKey + "/") { return newKey + key.dropFirst(oldKey.count) }
-            return key
-        }
-        expanded = Set(expanded.map(remap))
-        selection = selection.map(remap)
+        remapKeys(from: url.fileKey, to: target.fileKey)
         reload()
         return target
+    }
+
+    /// Moves a file or folder into another folder of the vault.
+    @discardableResult
+    func move(_ url: URL, into folder: URL) throws -> URL {
+        let sourceKey = url.fileKey
+        let folderKey = folder.fileKey
+        guard folderKey != sourceKey, !folderKey.hasPrefix(sourceKey + "/") else {
+            throw LibraryError.invalidMove
+        }
+        guard url.deletingLastPathComponent().fileKey != folderKey else { return url }
+
+        let target = folder.appendingPathComponent(url.lastPathComponent)
+        if fileManager.fileExists(atPath: target.path(percentEncoded: false)) {
+            throw LibraryError.nameTaken
+        }
+
+        try fileManager.moveItem(at: url, to: target)
+        remapKeys(from: sourceKey, to: target.fileKey)
+        if folderKey != rootURL?.fileKey {
+            expanded.insert(folderKey)
+        }
+        expandAncestors(of: target)
+        reload()
+        return target
+    }
+
+    /// Copies files and folders from outside the vault into a vault folder.
+    /// Only Markdown, text and PDF files are added. Originals are not changed.
+    func importItems(_ urls: [URL], into folder: URL) -> (imported: Int, skipped: Int) {
+        var imported = 0
+        var skipped = 0
+        var last: URL?
+
+        for source in urls {
+            let accessing = source.startAccessingSecurityScopedResource()
+            defer { if accessing { source.stopAccessingSecurityScopedResource() } }
+
+            let isFolder = (try? source.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            guard isFolder || FileNode.kind(for: source) != nil else {
+                skipped += 1
+                continue
+            }
+
+            let base = isFolder ? source.lastPathComponent : source.deletingPathExtension().lastPathComponent
+            let target = uniqueURL(named: base, pathExtension: isFolder ? nil : source.pathExtension, in: folder)
+            do {
+                try fileManager.copyItem(at: source, to: target)
+                imported += 1
+                last = target
+            } catch {
+                skipped += 1
+            }
+        }
+
+        reload()
+        if let last {
+            if folder.fileKey != rootURL?.fileKey {
+                expanded.insert(folder.fileKey)
+            }
+            expandAncestors(of: last)
+            selection = last.fileKey
+        }
+        return (imported, skipped)
     }
 
     func trash(_ url: URL) throws {
@@ -342,6 +405,17 @@ final class LibraryStore {
 
     func reveal(_ url: URL) {
         NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    /// Updates selection and open folders after an item moves.
+    private func remapKeys(from oldKey: String, to newKey: String) {
+        func remap(_ key: String) -> String {
+            if key == oldKey { return newKey }
+            if key.hasPrefix(oldKey + "/") { return newKey + key.dropFirst(oldKey.count) }
+            return key
+        }
+        expanded = Set(expanded.map(remap))
+        selection = selection.map(remap)
     }
 
     private func uniqueURL(named base: String, pathExtension: String?, in folder: URL) -> URL {

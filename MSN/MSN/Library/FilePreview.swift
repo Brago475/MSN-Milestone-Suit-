@@ -1,7 +1,7 @@
 import PDFKit
 import SwiftUI
 
-/// Right pane of Files: editor for text files, viewer for PDFs, summary for folders.
+/// Right pane of Files: welcome screen, editor for text files, viewer for PDFs, summary for folders.
 struct FilePreview: View {
 
     @Environment(LibraryStore.self) private var library
@@ -34,11 +34,7 @@ struct FilePreview: View {
                 }
             }
         } else {
-            ContentUnavailableView(
-                "No file selected",
-                systemImage: "doc.text",
-                description: Text("Choose a file in the sidebar, or create one with the new file button.")
-            )
+            WelcomeView()
         }
     }
 }

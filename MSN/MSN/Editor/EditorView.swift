@@ -2,16 +2,21 @@ import AppKit
 import Combine
 import SwiftUI
 
-/// Editor for a Markdown or text file: header, toolbar, text, status bar.
+/// Editor for a Markdown or text file: header, toolbar, pages or Markdown, status bar.
 struct EditorView: View {
 
     @Environment(LibraryStore.self) private var library
     let node: FileNode
 
     @State private var document: MarkdownDocument?
-    @State private var controller = EditorController()
+    @State private var markdownController = EditorController()
+    @State private var pageController = PageController()
+    @State private var pageCount = 1
     @AppStorage("editorFontSize") private var fontSize = 13.0
-    @AppStorage("editorMode") private var mode: EditorMode = .markdown
+    @AppStorage("editorViewMode") private var mode: EditorMode = .page
+    @AppStorage("pageZoomLevel") private var zoom = 1.0
+    @AppStorage("pagePaper") private var paper: PaperSize = .letter
+    @AppStorage("pageMargins") private var margins: MarginPreset = .normal
 
     private var folderPath: String {
         let parent = node.url.deletingLastPathComponent()
@@ -21,37 +26,51 @@ struct EditorView: View {
         return library.relativePath(of: parent).replacingOccurrences(of: "/", with: " / ")
     }
 
+    private var commands: any EditorCommands {
+        mode == .page ? pageController : markdownController
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             EditorHeader(title: node.name, path: folderPath, mode: $mode)
             Divider()
 
-            if mode == .markdown {
-                EditorToolbar(controller: controller, fontSize: $fontSize)
-                Divider()
-            }
+            EditorToolbar(
+                commands: commands,
+                markdownSize: $fontSize,
+                zoom: $zoom,
+                paper: $paper,
+                margins: $margins
+            )
+            Divider()
 
             Group {
                 if let document {
-                    if mode == .markdown {
-                        MarkdownTextView(document: document, controller: controller, fontSize: CGFloat(fontSize))
-                            .id(document.url)
-                    } else {
-                        ContentUnavailableView(
-                            "Page view is coming next",
-                            systemImage: "doc.richtext",
-                            description: Text("Switch to Markdown to edit this file. Page view arrives in step E2.")
+                    switch mode {
+                    case .page:
+                        PageEditor(
+                            document: document,
+                            controller: pageController,
+                            zoom: zoom,
+                            pageLayout: PageLayout(paper: paper, margins: margins),
+                            onPageCount: { pageCount = $0 }
                         )
+                        .id(document.url)
+                    case .markdown:
+                        MarkdownTextView(document: document, controller: markdownController, fontSize: CGFloat(fontSize))
+                            .id(document.url)
                     }
                 } else {
-                    ProgressView()
+                    DelayedView {
+                        EditorSkeleton()
+                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if let document {
                 Divider()
-                EditorStatusBar(document: document)
+                EditorStatusBar(document: document, mode: mode, pageCount: pageCount)
             }
         }
         .task(id: node.id) {

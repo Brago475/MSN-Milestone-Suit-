@@ -3,6 +3,7 @@ import SwiftUI
 struct IconRail: View {
 
     @Environment(VaultSession.self) private var vault
+    @Environment(\.openSettings) private var openSettings
     @Binding var selection: AppSection
 
     private var isUnlocked: Bool {
@@ -37,7 +38,9 @@ struct IconRail: View {
                     selection = .secrets
                 }
             }
-            RailActionButton(symbol: "gearshape", title: "Settings") {}
+            RailActionButton(symbol: "gearshape", title: "Settings") {
+                openSettings()
+            }
         }
         .padding(.top, Theme.titleBarInset)
         .padding(.bottom, 14)

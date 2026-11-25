@@ -7,6 +7,8 @@ struct MSNApp: App {
     @State private var library: LibraryStore
 
     init() {
+        FontRegistry.registerBundledFonts()
+
         #if DEBUG
         VaultSelfTest.run()
         #endif
@@ -26,5 +28,9 @@ struct MSNApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1280, height: 820)
+
+        Settings {
+            SettingsView()
+        }
     }
 }
