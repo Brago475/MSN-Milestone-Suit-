@@ -5,10 +5,12 @@ struct IconRail: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            Image(systemName: "folder.fill")
-                .font(.system(size: 26))
-                .foregroundStyle(Theme.accent)
-                .padding(.bottom, 10)
+            Image("RailLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 44, height: 44)
+                .padding(.bottom, 6)
+                .accessibilityLabel("MSN Milestone Suit")
 
             RailButton(section: .files, selection: $selection)
             RailDots()
