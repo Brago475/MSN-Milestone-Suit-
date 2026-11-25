@@ -49,6 +49,12 @@ final class VaultSession {
         return recovery
     }
 
+    /// Replaces the recovery key. Requires an unlocked vault.
+    func makeNewRecoveryKey() throws -> String {
+        guard let key = vaultKey else { throw VaultStore.VaultError.wrongPassword }
+        return try store.makeRecoveryKey(for: key)
+    }
+
     // MARK: Unlock and lock
 
     func unlock(password: String) async throws {

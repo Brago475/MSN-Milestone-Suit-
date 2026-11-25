@@ -13,7 +13,7 @@ struct MSNApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootView()
                 .environment(vault)
         }
         .windowStyle(.hiddenTitleBar)
