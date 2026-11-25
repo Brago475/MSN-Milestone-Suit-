@@ -2,6 +2,13 @@ import SwiftUI
 
 @main
 struct MSNApp: App {
+
+    init() {
+        #if DEBUG
+        VaultSelfTest.run()
+        #endif
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
