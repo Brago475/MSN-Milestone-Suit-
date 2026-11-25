@@ -1,11 +1,13 @@
 import SwiftUI
 
-/// First-launch flow: master password, recovery key, library folder.
+/// First-launch flow: vault name, location, master password, recovery key.
 struct SetupView: View {
 
-    var onFinish: () -> Void
+    @Environment(VaultSession.self) private var vault
+    @Environment(LibraryStore.self) private var library
 
     @State private var step = 1
+    @State private var vaultName = ""
     @State private var recoveryKey = ""
 
     var body: some View {
@@ -18,13 +20,26 @@ struct SetupView: View {
             SetupStepper(current: step)
 
             Group {
-                if step == 1 {
-                    PasswordStep { key in
-                        recoveryKey = key
+                switch step {
+                case 1:
+                    WelcomeStep(name: $vaultName) {
                         step = 2
                     }
-                } else {
-                    RecoveryStep(recoveryKey: recoveryKey, onContinue: onFinish)
+                case 2:
+                    LocationStep(
+                        name: vaultName,
+                        onBack: { step = 1 },
+                        onContinue: { step = 3 }
+                    )
+                case 3:
+                    PasswordStep { key in
+                        recoveryKey = key
+                        step = 4
+                    }
+                default:
+                    RecoveryStep(recoveryKey: recoveryKey) {
+                        try? vault.confirmRecoverySaved()
+                    }
                 }
             }
             .padding(28)
@@ -37,6 +52,11 @@ struct SetupView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
         .ignoresSafeArea()
+        .onAppear {
+            if library.hasLibrary {
+                step = 3
+            }
+        }
     }
 }
 
@@ -44,10 +64,10 @@ struct SetupView: View {
 struct SetupStepper: View {
 
     let current: Int
-    private let titles = ["Master password", "Recovery key", "Library folder"]
+    private let titles = ["Vault name", "Location", "Master password", "Recovery key"]
 
     var body: some View {
-        HStack(spacing: 22) {
+        HStack(spacing: 18) {
             ForEach(Array(titles.enumerated()), id: \.offset) { index, title in
                 let number = index + 1
                 let reached = number <= current

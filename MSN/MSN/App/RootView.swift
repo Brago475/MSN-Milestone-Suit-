@@ -1,16 +1,21 @@
 import SwiftUI
 
-/// Shows first-launch setup until it is finished, then the main app.
+/// Shows setup until the library has a finished vault, then the main app.
 struct RootView: View {
 
     @Environment(VaultSession.self) private var vault
-    @AppStorage("setupComplete") private var setupComplete = false
+    @Environment(LibraryStore.self) private var library
 
     var body: some View {
-        if setupComplete && vault.state != .needsSetup {
-            ContentView()
-        } else {
-            SetupView(onFinish: { setupComplete = true })
+        Group {
+            if library.hasLibrary && vault.isSetupComplete {
+                ContentView()
+            } else {
+                SetupView()
+            }
+        }
+        .onChange(of: library.rootURL) { _, newRoot in
+            vault.attach(to: newRoot)
         }
     }
 }

@@ -10,6 +10,7 @@ struct VaultHeader: Codable {
     var passwordWrappedKey: Data
     var recoverySalt: Data?
     var recoveryWrappedKey: Data?
+    var recoveryConfirmed: Bool?
 
     static let currentVersion = 1
 }

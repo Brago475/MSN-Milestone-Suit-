@@ -19,19 +19,18 @@ struct VaultStore {
         directory.appendingPathComponent("vault.json")
     }
 
-    /// The default store inside the app's private Application Support folder.
-    static func standard() throws -> VaultStore {
-        let base = try FileManager.default.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )
-        return VaultStore(directory: base.appendingPathComponent("MSN", isDirectory: true))
+    /// The vault stored inside a library folder, in its hidden .msn folder.
+    static func forLibrary(_ root: URL) -> VaultStore {
+        VaultStore(directory: root.appendingPathComponent(".msn", isDirectory: true))
     }
 
     var exists: Bool {
-        FileManager.default.fileExists(atPath: fileURL.path)
+        FileManager.default.fileExists(atPath: fileURL.path(percentEncoded: false))
+    }
+
+    /// True once the recovery key was shown and confirmed as saved.
+    var isSetupComplete: Bool {
+        (try? load())?.recoveryConfirmed == true
     }
 
     // MARK: Read and write
@@ -70,7 +69,8 @@ struct VaultStore {
             iterations: iterations,
             passwordWrappedKey: try VaultCrypto.wrap(vaultKey, with: passwordKey),
             recoverySalt: nil,
-            recoveryWrappedKey: nil
+            recoveryWrappedKey: nil,
+            recoveryConfirmed: false
         )
         try save(header)
         return vaultKey
@@ -114,7 +114,7 @@ struct VaultStore {
     // MARK: Recovery key
 
     var hasRecoveryKey: Bool {
-        (try? load().recoveryWrappedKey) != nil
+        (try? load())?.recoveryWrappedKey != nil
     }
 
     /// Creates a new recovery key for an unlocked vault. Any old recovery key stops working.
@@ -127,8 +127,16 @@ struct VaultStore {
         let recoveryKey = try VaultCrypto.deriveKey(password: plain, salt: salt, iterations: header.iterations)
         header.recoverySalt = salt
         header.recoveryWrappedKey = try VaultCrypto.wrap(vaultKey, with: recoveryKey)
+        header.recoveryConfirmed = false
         try save(header)
         return display
+    }
+
+    /// Marks the recovery key as saved, which finishes setup.
+    func confirmRecoverySaved() throws {
+        var header = try load()
+        header.recoveryConfirmed = true
+        try save(header)
     }
 
     /// Returns the vault key if the recovery key is correct.

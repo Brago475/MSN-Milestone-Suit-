@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Setup step 1. Creates the vault, or unlocks it if setup was left unfinished.
+/// Setup step 2. Creates the vault, or unlocks an unfinished one in this folder.
 struct PasswordStep: View {
 
     @Environment(VaultSession.self) private var vault
@@ -12,7 +12,7 @@ struct PasswordStep: View {
     @State private var isWorking = false
     @State private var errorText: String?
 
-    private var isResuming: Bool {
+    private var isExisting: Bool {
         vault.state != .needsSetup
     }
 
@@ -21,26 +21,27 @@ struct PasswordStep: View {
     }
 
     private var canContinue: Bool {
-        if isResuming { return !password.isEmpty }
+        if isExisting { return !password.isEmpty }
         return password.count >= 4 && password == confirm
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(isResuming ? "Enter your master password" : "Create a master password")
+                Text(isExisting ? "Enter your master password" : "Create a master password")
                     .font(.system(size: 20, weight: .bold))
-                Text(isResuming
-                     ? "Setup was not finished. Enter the password you created to continue."
-                     : "This password unlocks your secrets and locked folders. It can be simple, because it only works on this Mac.")
+                Text(isExisting
+                     ? "This vault's setup was not finished. Enter its password to continue."
+                     : "This password unlocks your secrets and locked folders. It can be simple, because it only works with this vault.")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             field("Master password", text: $password)
 
-            if !isResuming {
+            if !isExisting {
                 field("Confirm password", text: $confirm)
                 if mismatch {
                     Text("Passwords do not match.")
@@ -59,6 +60,7 @@ struct PasswordStep: View {
                 Text(errorText)
                     .font(.system(size: 12))
                     .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             HStack {
@@ -94,7 +96,7 @@ struct PasswordStep: View {
 
         do {
             let key: String
-            if isResuming {
+            if isExisting {
                 try await vault.unlock(password: password)
                 key = try vault.makeNewRecoveryKey()
             } else {
@@ -104,10 +106,11 @@ struct PasswordStep: View {
                 try? vault.enableTouchID()
             }
             onDone(key)
+        } catch VaultStore.VaultError.wrongPassword {
+            errorText = "That password is not correct."
         } catch {
-            errorText = isResuming
-                ? "That password is not correct."
-                : "The vault could not be created. Try again."
+            print("Vault create error: \(error)")
+            errorText = "The vault could not be created: \(error.localizedDescription)"
         }
     }
 }

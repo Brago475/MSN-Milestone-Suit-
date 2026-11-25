@@ -18,9 +18,12 @@ struct ContentView: View {
 
     @ViewBuilder
     private var sectionView: some View {
-        if selection == .secrets && vault.state != .unlocked {
+        switch selection {
+        case .files:
+            FilesView()
+        case .secrets where vault.state != .unlocked:
             LockedView()
-        } else {
+        default:
             SectionPlaceholder(section: selection)
         }
     }
@@ -29,4 +32,5 @@ struct ContentView: View {
 #Preview {
     ContentView()
         .environment(VaultSession())
+        .environment(LibraryStore())
 }
