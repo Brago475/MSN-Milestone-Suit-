@@ -1,53 +1,36 @@
 import PDFKit
 import SwiftUI
 
-/// Read-only view of the selected file. Replaced by the editor in the next phase.
+/// Right pane of Files: editor for text files, viewer for PDFs, summary for folders.
 struct FilePreview: View {
 
     @Environment(LibraryStore.self) private var library
     let node: FileNode?
 
-    @State private var text = ""
-
     var body: some View {
         if let node {
-            if node.isFolder {
+            switch node.kind {
+            case .folder:
                 ContentUnavailableView(
                     node.name,
                     systemImage: "folder",
                     description: Text("\(node.fileCount) files")
                 )
-            } else {
+            case .markdown, .text:
+                EditorView(node: node)
+            case .pdf:
                 VStack(alignment: .leading, spacing: 0) {
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 1) {
                         Text(node.name)
-                            .font(.system(size: 20, weight: .bold))
+                            .font(.system(size: 14, weight: .semibold))
                         Text(library.relativePath(of: node.url))
-                            .font(.system(size: 12))
+                            .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                     }
-                    .padding(.horizontal, 32)
-                    .padding(.top, 24)
-                    .padding(.bottom, 14)
-
+                    .padding(.horizontal, 20)
+                    .frame(height: 48)
                     Divider()
-
-                    if node.kind == .pdf {
-                        PDFPreview(url: node.url)
-                    } else {
-                        ScrollView {
-                            Text(text.isEmpty ? "This file is empty." : text)
-                                .font(.system(size: 13, design: .monospaced))
-                                .foregroundStyle(text.isEmpty ? Color.secondary : Color.primary)
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(32)
-                        }
-                    }
-                }
-                .task(id: node) {
-                    text = (try? String(contentsOf: node.url, encoding: .utf8))
-                        ?? "This file could not be read as text."
+                    PDFPreview(url: node.url)
                 }
             }
         } else {
