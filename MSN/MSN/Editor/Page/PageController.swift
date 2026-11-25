@@ -13,11 +13,14 @@ final class PageController: EditorCommands {
     private(set) var currentSize: Double = 11
     private(set) var currentAlignment: PageAlignment = .left
     private(set) var currentSpacing: Double = PageStyle.defaultSpacing
+    private(set) var isPainting = false
+
+    @ObservationIgnored private var paintStyle: [NSAttributedString.Key: Any] = [:]
 
     var isRichText: Bool { true }
 
     private static let inlineKeys: [NSAttributedString.Key] = [
-        .msnBold, .msnItalic, .msnUnderline, .msnStrike, .msnCode,
+        .msnBold, .msnItalic, .msnUnderline, .msnStrike, .msnSuper, .msnSub, .msnCode,
         .msnFont, .msnSize, .msnColor, .msnHighlight
     ]
 
@@ -37,6 +40,8 @@ final class PageController: EditorCommands {
     func toggleItalic() { toggleInline(.msnItalic) }
     func toggleUnderline() { toggleInline(.msnUnderline) }
     func toggleStrike() { toggleInline(.msnStrike) }
+    func toggleSuperscript() { toggleScript(.msnSuper, removing: .msnSub) }
+    func toggleSubscript() { toggleScript(.msnSub, removing: .msnSuper) }
 
     func setFont(_ font: PageFont) {
         applyInline(.msnFont, font.rawValue)
@@ -145,14 +150,49 @@ final class PageController: EditorCommands {
             return
         }
 
-        var allHave = true
-        storage.enumerateAttribute(key, in: selection) { value, _, stop in
+        applyInline(key, allHave(key, in: selection, storage) ? nil : true)
+    }
+
+    /// Superscript and subscript turn each other off.
+    private func toggleScript(_ key: NSAttributedString.Key, removing other: NSAttributedString.Key) {
+        guard let textView, let storage = textView.textStorage else { return }
+        let selection = textView.selectedRange()
+
+        if selection.length == 0 {
+            var semantic = textView.typingAttributes
+            semantic[key] = semantic[key] == nil ? true : nil
+            semantic[other] = nil
+            textView.typingAttributes = PageStyle.typingAttributes(
+                block: PageBlock(semantic),
+                level: semantic[.msnLevel] as? Int ?? 0,
+                props: ParagraphProps(semantic),
+                semantic: semantic
+            )
+            updateState()
+            return
+        }
+
+        let turnOff = allHave(key, in: selection, storage)
+        edit(selection) { storage in
+            storage.removeAttribute(other, range: selection)
+            if turnOff {
+                storage.removeAttribute(key, range: selection)
+            } else {
+                storage.addAttribute(key, value: true, range: selection)
+            }
+        }
+        updateState()
+    }
+
+    private func allHave(_ key: NSAttributedString.Key, in range: NSRange, _ storage: NSTextStorage) -> Bool {
+        var result = true
+        storage.enumerateAttribute(key, in: range) { value, _, stop in
             if value == nil {
-                allHave = false
+                result = false
                 stop.pointee = true
             }
         }
-        applyInline(key, allHave ? nil : true)
+        return result
     }
 
     /// Sets or clears an inline value on the selection, or on what is typed next.
@@ -181,6 +221,49 @@ final class PageController: EditorCommands {
             }
         }
         updateState()
+    }
+
+    // MARK: Paint format
+
+    /// Copies the formatting at the cursor. The next selection receives it.
+    func paintFormat() {
+        guard let textView, let storage = textView.textStorage else { return }
+        if isPainting {
+            stopPainting()
+            return
+        }
+        let selection = textView.selectedRange()
+        let source = selection.length > 0 && selection.location < storage.length
+            ? storage.attributes(at: selection.location, effectiveRange: nil)
+            : textView.typingAttributes
+        paintStyle = source.filter { Self.inlineKeys.contains($0.key) }
+        isPainting = true
+        textView.onSelectionFinished = { [weak self] in
+            self?.applyPaint()
+        }
+    }
+
+    private func applyPaint() {
+        guard isPainting, let textView else { return }
+        let selection = textView.selectedRange()
+        guard selection.length > 0 else { return }
+        let style = paintStyle
+        edit(selection) { storage in
+            for key in Self.inlineKeys {
+                storage.removeAttribute(key, range: selection)
+            }
+            if !style.isEmpty {
+                storage.addAttributes(style, range: selection)
+            }
+        }
+        stopPainting()
+        updateState()
+    }
+
+    private func stopPainting() {
+        isPainting = false
+        paintStyle = [:]
+        textView?.onSelectionFinished = nil
     }
 
     // MARK: Paragraphs
@@ -289,6 +372,36 @@ final class PageController: EditorCommands {
         updateState()
     }
 
+    /// Turns the selected paragraphs into a callout, or back into text.
+    func insertCallout(_ kind: CalloutKind) {
+        let paragraphs = selectedParagraphs()
+        let allSame = paragraphs.allSatisfy { paragraph in
+            let values = attributes(at: paragraph.location)
+            return PageBlock(values) == .callout && values[.msnCallout] as? String == kind.rawValue
+        }
+        if allSame {
+            applyBlock(.normal, level: 0, to: paragraphs)
+        } else {
+            applyBlock(.callout, level: 0, to: paragraphs, id: UUID().uuidString, callout: kind.rawValue)
+        }
+        updateState()
+    }
+
+    func insertDivider() {
+        insertAtomic(.divider)
+    }
+
+    func insertPageBreak() {
+        insertAtomic(.pageBreak)
+    }
+
+    func insertDate() {
+        guard let textView else { return }
+        let text = Date.now.formatted(date: .long, time: .omitted)
+        textView.insertText(text, replacementRange: textView.selectedRange())
+        focus()
+    }
+
     func insertTable() {
         guard let textView, let storage = textView.textStorage else { return }
         let ns = storage.string as NSString
@@ -319,9 +432,52 @@ final class PageController: EditorCommands {
         applyBlock(next, level: current.level, to: [paragraph])
     }
 
+    /// Inserts a divider or page break as its own paragraph after the cursor's paragraph.
+    /// An empty paragraph is replaced instead.
+    private func insertAtomic(_ block: PageBlock) {
+        guard let textView, let storage = textView.textStorage else { return }
+        let ns = storage.string as NSString
+        let caret = textView.selectedRange().location
+        let paragraph = ns.paragraphRange(for: NSRange(location: caret, length: 0))
+        let paragraphText = ns.substring(with: paragraph)
+        let isEmpty = paragraphText.trimmingCharacters(in: .newlines).isEmpty
+
+        let text = NSMutableAttributedString()
+        let range: NSRange
+        if isEmpty {
+            range = paragraph
+        } else {
+            range = NSRange(location: NSMaxRange(paragraph), length: 0)
+            if !paragraphText.hasSuffix("\n") {
+                text.append(NSAttributedString(
+                    string: "\n",
+                    attributes: storage.attributes(at: paragraph.location, effectiveRange: nil)
+                ))
+            }
+        }
+        text.append(NSAttributedString(
+            string: PageBlock.placeholder + "\n",
+            attributes: PageStyle.typingAttributes(block: block)
+        ))
+
+        guard textView.shouldChangeText(in: range, replacementString: text.string) else { return }
+        storage.replaceCharacters(in: range, with: text)
+        PageStyle.restyle(storage, around: NSRange(location: range.location, length: text.length))
+        textView.didChangeText()
+
+        let after = range.location + text.length
+        textView.setSelectedRange(NSRange(location: after, length: 0))
+        textView.typingAttributes = after < storage.length
+            ? storage.attributes(at: after, effectiveRange: nil)
+            : PageStyle.typingAttributes(block: .normal)
+        textView.needsDisplay = true
+        updateState()
+        focus()
+    }
+
     // MARK: Typing rules
 
-    /// Handles Enter, Backspace and Tab inside lists, headings, quotes and code.
+    /// Handles Enter, Backspace and Tab inside lists, headings, quotes, callouts, code and dividers.
     func handle(_ selector: Selector) -> Bool {
         guard let textView, let storage = textView.textStorage else { return false }
         let ns = storage.string as NSString
@@ -335,7 +491,12 @@ final class PageController: EditorCommands {
 
         switch selector {
         case #selector(NSResponder.insertNewline(_:)):
-            if content.isEmpty && (current.block.isList || current.block == .quote || current.block == .code) {
+            if current.block.isAtomic {
+                insertParagraph(after: paragraph)
+                return true
+            }
+            let exits = current.block.isList || current.block == .quote || current.block == .code || current.block == .callout
+            if content.isEmpty && exits {
                 applyBlock(.normal, level: 0, to: [paragraph])
                 return true
             }
@@ -352,6 +513,17 @@ final class PageController: EditorCommands {
             return false
 
         case #selector(NSResponder.deleteBackward(_:)):
+            if current.block.isAtomic {
+                removeParagraph(paragraph)
+                return true
+            }
+            if selection.location == paragraph.location, paragraph.location > 0 {
+                let previous = ns.paragraphRange(for: NSRange(location: paragraph.location - 1, length: 0))
+                if info(at: previous.location).block.isAtomic {
+                    removeParagraph(previous)
+                    return true
+                }
+            }
             guard selection.location == paragraph.location, current.block != .normal else { return false }
             if current.block.isList && current.level > 0 {
                 applyBlock(current.block, level: current.level - 1, to: [paragraph])
@@ -386,6 +558,37 @@ final class PageController: EditorCommands {
             PageStyle.restyle(storage, around: paragraph)
         }
         textView.typingAttributes = PageStyle.typingAttributes(block: block, level: level)
+        updateState()
+    }
+
+    /// Adds an empty normal paragraph after a divider or page break and moves the cursor there.
+    private func insertParagraph(after paragraph: NSRange) {
+        guard let textView, let storage = textView.textStorage else { return }
+        let ns = storage.string as NSString
+        let endsWithNewline = ns.substring(with: paragraph).hasSuffix("\n")
+        let normal = PageStyle.typingAttributes(block: .normal)
+        let location = NSMaxRange(paragraph)
+        let attributes = endsWithNewline
+            ? normal
+            : storage.attributes(at: paragraph.location, effectiveRange: nil)
+
+        guard textView.shouldChangeText(in: NSRange(location: location, length: 0), replacementString: "\n") else { return }
+        storage.insert(NSAttributedString(string: "\n", attributes: attributes), at: location)
+        PageStyle.restyle(storage, around: NSRange(location: location, length: 1))
+        textView.didChangeText()
+        textView.setSelectedRange(NSRange(location: endsWithNewline ? location : location + 1, length: 0))
+        textView.typingAttributes = normal
+        updateState()
+    }
+
+    private func removeParagraph(_ range: NSRange) {
+        guard let textView, let storage = textView.textStorage, range.length > 0 else { return }
+        guard textView.shouldChangeText(in: range, replacementString: "") else { return }
+        storage.deleteCharacters(in: range)
+        PageStyle.restyle(storage, around: NSRange(location: min(range.location, storage.length), length: 0))
+        textView.didChangeText()
+        textView.setSelectedRange(NSRange(location: min(range.location, storage.length), length: 0))
+        textView.needsDisplay = true
         updateState()
     }
 
@@ -425,18 +628,21 @@ final class PageController: EditorCommands {
         textView.window?.makeFirstResponder(textView)
     }
 
-    private func info(at location: Int) -> (block: PageBlock, level: Int) {
-        guard let textView, let storage = textView.textStorage else { return (.normal, 0) }
-        let attributes: [NSAttributedString.Key: Any]
+    private func attributes(at location: Int) -> [NSAttributedString.Key: Any] {
+        guard let textView, let storage = textView.textStorage else { return [:] }
         if location < storage.length {
-            attributes = storage.attributes(at: location, effectiveRange: nil)
-        } else if storage.length > 0, location == storage.length,
-                  (storage.string as NSString).character(at: storage.length - 1) != 10 {
-            attributes = storage.attributes(at: storage.length - 1, effectiveRange: nil)
-        } else {
-            attributes = textView.typingAttributes
+            return storage.attributes(at: location, effectiveRange: nil)
         }
-        return (PageBlock(attributes), attributes[.msnLevel] as? Int ?? 0)
+        if storage.length > 0, location == storage.length,
+           (storage.string as NSString).character(at: storage.length - 1) != 10 {
+            return storage.attributes(at: storage.length - 1, effectiveRange: nil)
+        }
+        return textView.typingAttributes
+    }
+
+    private func info(at location: Int) -> (block: PageBlock, level: Int) {
+        let values = attributes(at: location)
+        return (PageBlock(values), values[.msnLevel] as? Int ?? 0)
     }
 
     private func selectedParagraphs() -> [NSRange] {
@@ -454,7 +660,13 @@ final class PageController: EditorCommands {
     }
 
     /// Sets the block kind of paragraphs with undo support.
-    private func applyBlock(_ block: PageBlock, level: Int?, to paragraphs: [NSRange], id: String? = nil) {
+    private func applyBlock(
+        _ block: PageBlock,
+        level: Int?,
+        to paragraphs: [NSRange],
+        id: String? = nil,
+        callout: String? = nil
+    ) {
         guard let textView, let storage = textView.textStorage else { return }
         let filled = paragraphs.filter { $0.length > 0 }
 
@@ -462,6 +674,7 @@ final class PageController: EditorCommands {
             let current = info(at: textView.selectedRange().location)
             var semantic: [NSAttributedString.Key: Any] = [:]
             if let id { semantic[.msnBlockID] = id }
+            if let callout { semantic[.msnCallout] = callout }
             textView.typingAttributes = PageStyle.typingAttributes(block: block, level: level ?? current.level, semantic: semantic)
             updateState()
             return
@@ -477,6 +690,11 @@ final class PageController: EditorCommands {
                 storage.addAttribute(.msnBlockID, value: id, range: paragraph)
             } else if !block.isLiteral {
                 storage.removeAttribute(.msnBlockID, range: paragraph)
+            }
+            if let callout {
+                storage.addAttribute(.msnCallout, value: callout, range: paragraph)
+            } else {
+                storage.removeAttribute(.msnCallout, range: paragraph)
             }
         }
         PageStyle.restyle(storage, around: union)

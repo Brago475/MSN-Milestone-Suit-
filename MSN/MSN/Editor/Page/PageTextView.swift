@@ -1,7 +1,7 @@
 import AppKit
 
 /// Text view that draws separate pages, block decorations and list markers.
-/// Lines that would cross a page edge are moved to the next page.
+/// Lines that would cross a page edge, or follow a page break, move to the next page.
 final class PageTextView: NSTextView, NSLayoutManagerDelegate {
 
     static let topGap: CGFloat = 32
@@ -14,6 +14,7 @@ final class PageTextView: NSTextView, NSLayoutManagerDelegate {
 
     var onToggleTask: ((NSRange) -> Void)?
     var onPageCount: ((Int) -> Void)?
+    var onSelectionFinished: (() -> Void)?
     private(set) var pageCount = 1
     private var checkboxHits: [(NSRect, NSRange)] = []
 
@@ -98,11 +99,27 @@ final class PageTextView: NSTextView, NSLayoutManagerDelegate {
         let page = (top / stride).rounded(.down)
         let local = top - page * stride
 
-        guard local > 0, local + height > pageLayout.contentHeight else { return false }
-        let shift = (page + 1) * stride - top
+        var shift: CGFloat = 0
+        if local > 0.5, followsPageBreak(layoutManager, glyphRange) {
+            shift = (page + 1) * stride - top
+        } else if local > 0, local + height > pageLayout.contentHeight {
+            shift = (page + 1) * stride - top
+        }
+        guard shift > 0 else { return false }
+
         lineFragmentRect.pointee.origin.y += shift
         lineFragmentUsedRect.pointee.origin.y += shift
         return true
+    }
+
+    /// True when the line is the first one after a page break paragraph.
+    private func followsPageBreak(_ layoutManager: NSLayoutManager, _ glyphRange: NSRange) -> Bool {
+        guard let storage = layoutManager.textStorage, glyphRange.length > 0 else { return false }
+        let index = layoutManager.characterIndexForGlyph(at: glyphRange.location)
+        guard index > 0, index <= storage.length else { return false }
+        let ns = storage.string as NSString
+        guard ns.character(at: index - 1) == 10 else { return false }
+        return PageBlock(storage.attributes(at: index - 1, effectiveRange: nil)) == .pageBreak
     }
 
     func layoutManager(
@@ -152,6 +169,8 @@ final class PageTextView: NSTextView, NSLayoutManagerDelegate {
         }
 
         drawBlockDecorations()
+        drawCallouts()
+        drawBreaks()
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -184,6 +203,85 @@ final class PageTextView: NSTextView, NSLayoutManagerDelegate {
                 )
                 PageStyle.codeFill.setFill()
                 NSBezierPath(roundedRect: box, xRadius: 6, yRadius: 6).fill()
+            }
+        }
+    }
+
+    /// Tinted box with a colored bar for each callout.
+    private func drawCallouts() {
+        guard let storage = textStorage, let layoutManager, let textContainer, storage.length > 0 else { return }
+        let origin = textContainerOrigin
+        let width = textContainer.size.width
+
+        storage.enumerateAttribute(.msnCallout, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
+            guard let raw = value as? String, let kind = CalloutKind(rawValue: raw) else { return }
+            let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            guard glyphs.length > 0 else { return }
+            let first = layoutManager.lineFragmentUsedRect(forGlyphAt: glyphs.location, effectiveRange: nil)
+            let last = layoutManager.lineFragmentUsedRect(forGlyphAt: NSMaxRange(glyphs) - 1, effectiveRange: nil)
+            let box = NSRect(
+                x: origin.x,
+                y: origin.y + first.minY - 8,
+                width: width,
+                height: last.maxY - first.minY + 16
+            )
+            let path = NSBezierPath(roundedRect: box, xRadius: 6, yRadius: 6)
+            kind.fill.setFill()
+            path.fill()
+
+            NSGraphicsContext.saveGraphicsState()
+            path.addClip()
+            kind.bar.setFill()
+            NSRect(x: box.minX, y: box.minY, width: 4, height: box.height).fill()
+            NSGraphicsContext.restoreGraphicsState()
+        }
+    }
+
+    /// A rule for dividers and a dashed labeled line for page breaks.
+    private func drawBreaks() {
+        guard let storage = textStorage, let layoutManager, let textContainer, storage.length > 0 else { return }
+        let origin = textContainerOrigin
+        let width = textContainer.size.width
+        let ns = storage.string as NSString
+        let labelAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 10, weight: .medium),
+            .foregroundColor: PageStyle.muted
+        ]
+
+        ns.enumerateSubstrings(in: NSRange(location: 0, length: ns.length), options: [.byParagraphs, .substringNotRequired]) { _, _, enclosing, _ in
+            guard enclosing.length > 0 else { return }
+            let block = PageBlock(storage.attributes(at: enclosing.location, effectiveRange: nil))
+            guard block.isAtomic else { return }
+
+            let glyph = layoutManager.glyphIndexForCharacter(at: enclosing.location)
+            let used = layoutManager.lineFragmentUsedRect(forGlyphAt: glyph, effectiveRange: nil)
+            let y = (origin.y + used.midY).rounded() + 0.5
+
+            let line = NSBezierPath()
+            line.move(to: NSPoint(x: origin.x, y: y))
+            line.line(to: NSPoint(x: origin.x + width, y: y))
+            line.lineWidth = 1
+
+            if block == .divider {
+                PageStyle.rule.setStroke()
+                line.stroke()
+            } else {
+                let pattern: [CGFloat] = [4, 3]
+                line.setLineDash(pattern, count: 2, phase: 0)
+                PageStyle.muted.withAlphaComponent(0.6).setStroke()
+                line.stroke()
+
+                let label = "Page break" as NSString
+                let size = label.size(withAttributes: labelAttributes)
+                let labelRect = NSRect(
+                    x: origin.x + (width - size.width) / 2 - 6,
+                    y: y - size.height / 2,
+                    width: size.width + 12,
+                    height: size.height
+                )
+                NSColor.white.setFill()
+                labelRect.fill()
+                label.draw(at: NSPoint(x: labelRect.minX + 6, y: labelRect.minY), withAttributes: labelAttributes)
             }
         }
     }
@@ -275,6 +373,7 @@ final class PageTextView: NSTextView, NSLayoutManagerDelegate {
             return
         }
         super.mouseDown(with: event)
+        onSelectionFinished?()
     }
 
     /// Pasted text is read as Markdown, so formatting carries over.

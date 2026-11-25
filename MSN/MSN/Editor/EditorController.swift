@@ -38,6 +38,7 @@ final class EditorController: EditorCommands {
     private(set) var currentStyle: TextStyle = .normal
 
     var isRichText: Bool { false }
+    var isPainting: Bool { false }
     var currentFont: PageFont { .menlo }
     var currentSize: Double { 0 }
     var currentAlignment: PageAlignment { .left }
@@ -62,6 +63,8 @@ final class EditorController: EditorCommands {
     func toggleItalic() { toggleWrap("*", placeholder: "italic text") }
     func toggleUnderline() { toggleWrap("<u>", "</u>", placeholder: "underlined text") }
     func toggleStrike() { toggleWrap("~~", placeholder: "text") }
+    func toggleSuperscript() { toggleWrap("<sup>", "</sup>", placeholder: "text") }
+    func toggleSubscript() { toggleWrap("<sub>", "</sub>", placeholder: "text") }
 
     // Rich formatting is only available in Page view.
     func setFont(_ font: PageFont) {}
@@ -70,6 +73,7 @@ final class EditorController: EditorCommands {
     func setTextColor(_ hex: String?) {}
     func setHighlight(_ hex: String?) {}
     func clearFormatting() {}
+    func paintFormat() {}
     func setAlignment(_ alignment: PageAlignment) {}
     func setLineSpacing(_ spacing: Double) {}
     func indent(_ delta: Int) {}
@@ -157,6 +161,29 @@ final class EditorController: EditorCommands {
         let inner = selection.length > 0 ? text.substring(with: selection) : ""
         let block = "```\n" + inner + "\n```\n"
         insertBlock(block, select: NSRange(location: 4, length: (inner as NSString).length), replacing: selection)
+    }
+
+    /// A blank line before --- keeps it from turning the line above into a heading.
+    func insertDivider() {
+        let block = "\n---\n"
+        insertBlock(block, select: NSRange(location: (block as NSString).length, length: 0))
+    }
+
+    func insertPageBreak() {
+        let block = "\n" + PageBlock.pageBreakMarker + "\n"
+        insertBlock(block, select: NSRange(location: (block as NSString).length, length: 0))
+    }
+
+    func insertCallout(_ kind: CalloutKind) {
+        let block = "> [!\(kind.rawValue)]\n> "
+        insertBlock(block, select: NSRange(location: (block as NSString).length, length: 0))
+    }
+
+    func insertDate() {
+        guard let textView else { return }
+        let date = Date.now.formatted(date: .long, time: .omitted)
+        let selection = textView.selectedRange()
+        replace(selection, with: date, select: NSRange(location: selection.location + (date as NSString).length, length: 0))
     }
 
     private func insertBlock(_ block: String, select: NSRange, replacing range: NSRange? = nil) {

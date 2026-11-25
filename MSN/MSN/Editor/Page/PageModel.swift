@@ -6,10 +6,13 @@ extension NSAttributedString.Key {
     nonisolated static let msnLevel = NSAttributedString.Key("msnLevel")
     nonisolated static let msnBlockID = NSAttributedString.Key("msnBlockID")
     nonisolated static let msnLanguage = NSAttributedString.Key("msnLanguage")
+    nonisolated static let msnCallout = NSAttributedString.Key("msnCallout")
     nonisolated static let msnBold = NSAttributedString.Key("msnBold")
     nonisolated static let msnItalic = NSAttributedString.Key("msnItalic")
     nonisolated static let msnUnderline = NSAttributedString.Key("msnUnderline")
     nonisolated static let msnStrike = NSAttributedString.Key("msnStrike")
+    nonisolated static let msnSuper = NSAttributedString.Key("msnSuper")
+    nonisolated static let msnSub = NSAttributedString.Key("msnSub")
     nonisolated static let msnCode = NSAttributedString.Key("msnCode")
     nonisolated static let msnFont = NSAttributedString.Key("msnFont")
     nonisolated static let msnSize = NSAttributedString.Key("msnSize")
@@ -26,12 +29,19 @@ enum PageBlock: String {
     case title
     case heading1, heading2, heading3, heading4, heading5, heading6
     case quote
+    case callout
     case code
     case raw
     case bullet
     case ordered
     case task
     case taskDone
+    case divider
+    case pageBreak
+
+    /// Text held by divider and page break paragraphs. Never written to Markdown.
+    nonisolated static let placeholder = "\u{200B}"
+    nonisolated static let pageBreakMarker = "<!-- msn: pagebreak -->"
 
     init(_ attributes: [NSAttributedString.Key: Any]) {
         self = PageBlock(rawValue: attributes[.msnBlock] as? String ?? "") ?? .normal
@@ -68,6 +78,48 @@ enum PageBlock: String {
 
     var isLiteral: Bool {
         self == .code || self == .raw
+    }
+
+    /// Paragraphs drawn as one box with shared spacing.
+    var isGrouped: Bool {
+        isLiteral || self == .callout
+    }
+
+    /// Paragraphs that hold no text, only a drawn element.
+    var isAtomic: Bool {
+        self == .divider || self == .pageBreak
+    }
+}
+
+/// Callout styles, written as > [!info], > [!warning] or > [!tip].
+enum CalloutKind: String, CaseIterable, Identifiable {
+    case info, warning, tip
+
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+
+    var symbol: String {
+        switch self {
+        case .info: "info.circle"
+        case .warning: "exclamationmark.triangle"
+        case .tip: "lightbulb"
+        }
+    }
+
+    var bar: NSColor {
+        switch self {
+        case .info: Hex.color("#0A5FE8") ?? .systemBlue
+        case .warning: Hex.color("#D9900A") ?? .systemOrange
+        case .tip: Hex.color("#2F9E44") ?? .systemGreen
+        }
+    }
+
+    var fill: NSColor {
+        switch self {
+        case .info: Hex.color("#EDF3FE") ?? .white
+        case .warning: Hex.color("#FFF6E5") ?? .white
+        case .tip: Hex.color("#EBF7EE") ?? .white
+        }
     }
 }
 

@@ -9,6 +9,7 @@ enum PageStyle {
 
     static let defaultSpacing = 1.15
     static let indentStep: CGFloat = 48
+    static let calloutInset: CGFloat = 18
 
     static let ink = NSColor.black
     static let body = NSColor.black
@@ -80,7 +81,10 @@ enum PageStyle {
         let family: PageFont = isCode
             ? .jetBrainsMono
             : (PageFont(rawValue: semantic[.msnFont] as? String ?? "") ?? defaultFont(block))
-        let points = semantic[.msnSize] as? Double ?? (isCode ? defaultSize(block) - 1 : defaultSize(block))
+        var points = semantic[.msnSize] as? Double ?? (isCode ? defaultSize(block) - 1 : defaultSize(block))
+        if semantic[.msnSuper] != nil || semantic[.msnSub] != nil {
+            points *= 0.7
+        }
 
         var font = family.font(size: CGFloat(points) * scale)
         if block.isHeading || semantic[.msnBold] != nil {
@@ -94,7 +98,7 @@ enum PageStyle {
 
     // MARK: Paragraphs
 
-    /// Paragraph style. Code and raw blocks get space only at their first and last line.
+    /// Paragraph style. Grouped blocks get space only at their first and last line.
     static func paragraphStyle(
         _ block: PageBlock,
         level: Int,
@@ -122,8 +126,15 @@ enum PageStyle {
         case .code, .raw:
             style.paragraphSpacingBefore = groupStart ? 10 * scale : 0
             style.paragraphSpacing = groupEnd ? 12 * scale : 0
+        case .callout:
+            style.paragraphSpacingBefore = groupStart ? 10 * scale : 0
+            style.paragraphSpacing = groupEnd ? 12 * scale : 4 * scale
+            style.tailIndent = -14
         case .bullet, .ordered, .task, .taskDone:
             style.paragraphSpacing = 2 * scale
+        case .divider, .pageBreak:
+            style.paragraphSpacingBefore = 4 * scale
+            style.paragraphSpacing = 4 * scale
         default:
             break
         }
@@ -132,7 +143,9 @@ enum PageStyle {
         if block.isList {
             indent = listIndent(level)
         } else {
-            indent = CGFloat(props.indent) * indentStep + (block == .quote ? 16 : 0)
+            indent = CGFloat(props.indent) * indentStep
+                + (block == .quote ? 16 : 0)
+                + (block == .callout ? calloutInset : 0)
         }
         style.firstLineHeadIndent = indent
         style.headIndent = indent
@@ -160,6 +173,7 @@ enum PageStyle {
         if isCode { color = codeInk }
         if link { color = accent }
         if let hex = semantic[.msnColor] as? String, let custom = Hex.color(hex) { color = custom }
+        if block.isAtomic { color = .clear }
 
         var attributes: [NSAttributedString.Key: Any] = [
             .font: font(block, semantic: semantic),
@@ -176,6 +190,13 @@ enum PageStyle {
             attributes[.backgroundColor] = fill
         } else if isCode {
             attributes[.backgroundColor] = codeFill
+        }
+
+        let baseSize = CGFloat(semantic[.msnSize] as? Double ?? defaultSize(block))
+        if semantic[.msnSuper] != nil {
+            attributes[.baselineOffset] = baseSize * 0.35 * scale
+        } else if semantic[.msnSub] != nil {
+            attributes[.baselineOffset] = -baseSize * 0.15 * scale
         }
         return attributes
     }
@@ -194,6 +215,7 @@ enum PageStyle {
         attributes[.underlineStyle] = nil
         attributes[.strikethroughStyle] = nil
         attributes[.backgroundColor] = nil
+        attributes[.baselineOffset] = nil
         for (key, value) in visualAttributes(block: block, level: level, props: props, semantic: semantic) {
             attributes[key] = value
         }
@@ -235,7 +257,7 @@ enum PageStyle {
 
         storage.addAttribute(.msnBlock, value: block.rawValue, range: range)
         storage.addAttribute(.msnLevel, value: level, range: range)
-        for key in [NSAttributedString.Key.msnBlockID, .msnLanguage, .msnAlign, .msnSpacing, .msnIndent] {
+        for key in [NSAttributedString.Key.msnBlockID, .msnLanguage, .msnCallout, .msnAlign, .msnSpacing, .msnIndent] {
             if let value = first[key] {
                 storage.addAttribute(key, value: value, range: range)
             } else {
@@ -245,7 +267,7 @@ enum PageStyle {
 
         var groupStart = false
         var groupEnd = false
-        if block.isLiteral {
+        if block.isGrouped {
             let id = first[.msnBlockID] as? String
             func sameGroup(_ attributes: [NSAttributedString.Key: Any]) -> Bool {
                 PageBlock(attributes) == block && attributes[.msnBlockID] as? String == id
@@ -260,6 +282,7 @@ enum PageStyle {
         storage.removeAttribute(.underlineStyle, range: range)
         storage.removeAttribute(.strikethroughStyle, range: range)
         storage.removeAttribute(.backgroundColor, range: range)
+        storage.removeAttribute(.baselineOffset, range: range)
 
         var runs: [(NSRange, [NSAttributedString.Key: Any])] = []
         storage.enumerateAttributes(in: range) { attributes, runRange, _ in

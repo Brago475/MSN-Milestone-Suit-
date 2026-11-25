@@ -31,10 +31,13 @@ final class MarkdownReader {
         var id: String?
         var language: String?
         var props = ParagraphProps()
+        var callout: String?
     }
 
     private let output = NSMutableAttributedString()
     private var underlineDepth = 0
+    private var superDepth = 0
+    private var subDepth = 0
     private var spans: [SpanStyle] = []
     private var pendingProps: ParagraphProps?
 
@@ -80,12 +83,19 @@ final class MarkdownReader {
     private func block(_ markup: Markup, listLevel: Int) {
         switch markup {
         case let html as HTMLBlock:
-            if let props = ParagraphProps.parse(html.rawHTML) {
+            let trimmed = html.rawHTML.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed == PageBlock.pageBreakMarker {
+                pendingProps = nil
+                atomic(.pageBreak)
+            } else if let props = ParagraphProps.parse(html.rawHTML) {
                 pendingProps = props
             } else {
                 pendingProps = nil
                 lines(html.rawHTML, Context(block: .raw, id: UUID().uuidString))
             }
+        case is ThematicBreak:
+            pendingProps = nil
+            atomic(.divider)
         case let heading as Heading:
             let props = takeProps()
             let kind: PageBlock = props.isTitle && heading.level == 1 ? .title : .heading(heading.level)
@@ -94,11 +104,15 @@ final class MarkdownReader {
             self.paragraph(paragraph, Context(block: .normal, props: takeProps()))
         case let quote as BlockQuote:
             let props = takeProps()
-            for child in quote.children {
-                if let paragraph = child as? Paragraph {
-                    self.paragraph(paragraph, Context(block: .quote, props: props))
-                } else {
-                    block(child, listLevel: 0)
+            if let kind = Self.calloutKind(quote) {
+                callout(quote, kind: kind)
+            } else {
+                for child in quote.children {
+                    if let paragraph = child as? Paragraph {
+                        self.paragraph(paragraph, Context(block: .quote, props: props))
+                    } else {
+                        block(child, listLevel: 0)
+                    }
                 }
             }
         case let code as CodeBlock:
@@ -120,6 +134,48 @@ final class MarkdownReader {
         }
     }
 
+    /// Divider and page break paragraphs hold one invisible character.
+    private func atomic(_ kind: PageBlock) {
+        append(PageBlock.placeholder + "\n", InlineStyle(), Context(block: kind))
+    }
+
+    // MARK: Callouts
+
+    private static func calloutKind(_ quote: BlockQuote) -> CalloutKind? {
+        guard let first = quote.child(at: 0) as? Paragraph else { return nil }
+        let text = first.plainText.lowercased()
+        return CalloutKind.allCases.first { text.hasPrefix("[!\($0.rawValue)]") }
+    }
+
+    private func callout(_ quote: BlockQuote, kind: CalloutKind) {
+        let context = Context(block: .callout, id: UUID().uuidString, callout: kind.rawValue)
+        var isFirst = true
+        for child in quote.children {
+            if let paragraph = child as? Paragraph {
+                let start = output.length
+                self.paragraph(paragraph, context)
+                if isFirst {
+                    stripCalloutMarker(from: start)
+                    isFirst = false
+                }
+            } else {
+                block(child, listLevel: 0)
+            }
+        }
+    }
+
+    /// Removes the [!kind] marker from the start of the first callout paragraph.
+    private func stripCalloutMarker(from start: Int) {
+        let ns = output.string as NSString
+        guard start < ns.length else { return }
+        let rest = ns.substring(from: start)
+        guard let match = rest.firstMatch(of: /^\[![A-Za-z]+\][ \t]*/) else { return }
+        let length = (String(rest[match.range]) as NSString).length
+        output.deleteCharacters(in: NSRange(location: start, length: length))
+    }
+
+    // MARK: Lists and paragraphs
+
     private func listItem(_ item: ListItem, ordered: Bool, level: Int) {
         let kind: PageBlock
         switch item.checkbox {
@@ -140,6 +196,8 @@ final class MarkdownReader {
 
     private func paragraph(_ container: Markup, _ context: Context) {
         underlineDepth = 0
+        superDepth = 0
+        subDepth = 0
         spans.removeAll()
         for child in container.children {
             inline(child, InlineStyle(), context)
@@ -194,18 +252,29 @@ final class MarkdownReader {
 
     private func inlineHTML(_ raw: String, _ style: InlineStyle, _ context: Context) {
         let tag = raw.lowercased()
-        if tag == "<u>" {
+        switch tag {
+        case "<u>":
             underlineDepth += 1
-        } else if tag == "</u>" {
+        case "</u>":
             underlineDepth = max(0, underlineDepth - 1)
-        } else if tag.hasPrefix("<mark") {
-            spans.append(SpanStyle(highlight: "#FFF3A3"))
-        } else if tag.hasPrefix("<span") {
-            spans.append(parseSpan(raw))
-        } else if tag == "</span>" || tag == "</mark>" {
+        case "<sup>":
+            superDepth += 1
+        case "</sup>":
+            superDepth = max(0, superDepth - 1)
+        case "<sub>":
+            subDepth += 1
+        case "</sub>":
+            subDepth = max(0, subDepth - 1)
+        case "</span>", "</mark>":
             if !spans.isEmpty { spans.removeLast() }
-        } else {
-            append(raw, style, context)
+        default:
+            if tag.hasPrefix("<mark") {
+                spans.append(SpanStyle(highlight: "#FFF3A3"))
+            } else if tag.hasPrefix("<span") {
+                spans.append(parseSpan(raw))
+            } else {
+                append(raw, style, context)
+            }
         }
     }
 
@@ -251,10 +320,16 @@ final class MarkdownReader {
         context.props.apply(to: &attributes)
         if let id = context.id { attributes[.msnBlockID] = id }
         if let language = context.language, !language.isEmpty { attributes[.msnLanguage] = language }
+        if let callout = context.callout { attributes[.msnCallout] = callout }
         if style.bold { attributes[.msnBold] = true }
         if style.italic { attributes[.msnItalic] = true }
         if style.strike { attributes[.msnStrike] = true }
         if style.underline || underlineDepth > 0 { attributes[.msnUnderline] = true }
+        if superDepth > 0 {
+            attributes[.msnSuper] = true
+        } else if subDepth > 0 {
+            attributes[.msnSub] = true
+        }
         if style.code { attributes[.msnCode] = true }
         if let link = style.link { attributes[.link] = link }
 

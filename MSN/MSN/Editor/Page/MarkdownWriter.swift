@@ -8,12 +8,13 @@ enum MarkdownWriter {
         let level: Int
         let id: String?
         let language: String?
+        let callout: String?
         let props: ParagraphProps
         let range: NSRange
     }
 
     private enum Mark: CaseIterable {
-        case underline, strike, bold, italic
+        case underline, strike, bold, italic, sup, sub
 
         var open: String {
             switch self {
@@ -21,12 +22,16 @@ enum MarkdownWriter {
             case .strike: "~~"
             case .bold: "**"
             case .italic: "*"
+            case .sup: "<sup>"
+            case .sub: "<sub>"
             }
         }
 
         var close: String {
             switch self {
             case .underline: "</u>"
+            case .sup: "</sup>"
+            case .sub: "</sub>"
             default: open
             }
         }
@@ -37,6 +42,8 @@ enum MarkdownWriter {
             case .strike: .msnStrike
             case .bold: .msnBold
             case .italic: .msnItalic
+            case .sup: .msnSuper
+            case .sub: .msnSub
             }
         }
     }
@@ -67,6 +74,25 @@ enum MarkdownWriter {
                 } else {
                     chunks.append(group.joined(separator: "\n"))
                 }
+                index = end
+
+            case .divider:
+                chunks.append("---")
+                index += 1
+
+            case .pageBreak:
+                chunks.append(PageBlock.pageBreakMarker)
+                index += 1
+
+            case .callout:
+                var group: [String] = []
+                var end = index
+                while end < lines.count, lines[end].block == .callout, lines[end].id == line.id {
+                    group.append("> " + inline(text, lines[end].range))
+                    end += 1
+                }
+                let kind = line.callout ?? CalloutKind.info.rawValue
+                chunks.append("> [!\(kind)]\n" + group.joined(separator: "\n>\n"))
                 index = end
 
             case .bullet, .ordered, .task, .taskDone:
@@ -161,6 +187,7 @@ enum MarkdownWriter {
                 level: attributes[.msnLevel] as? Int ?? 0,
                 id: attributes[.msnBlockID] as? String,
                 language: attributes[.msnLanguage] as? String,
+                callout: attributes[.msnCallout] as? String,
                 props: ParagraphProps(attributes),
                 range: range
             ))
@@ -193,7 +220,7 @@ enum MarkdownWriter {
         }
 
         text.enumerateAttributes(in: range) { attributes, runRange, _ in
-            let raw = ns.substring(with: runRange)
+            let raw = ns.substring(with: runRange).replacingOccurrences(of: PageBlock.placeholder, with: "")
             let span = spanStyle(attributes)
             let link = (attributes[.link] as? URL)?.absoluteString ?? (attributes[.link] as? String)
 
