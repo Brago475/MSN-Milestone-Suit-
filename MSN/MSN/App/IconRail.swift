@@ -1,7 +1,13 @@
 import SwiftUI
 
 struct IconRail: View {
+
+    @Environment(VaultSession.self) private var vault
     @Binding var selection: AppSection
+
+    private var isUnlocked: Bool {
+        vault.state == .unlocked
+    }
 
     var body: some View {
         VStack(spacing: 6) {
@@ -21,7 +27,16 @@ struct IconRail: View {
 
             Spacer()
 
-            RailActionButton(symbol: "lock", title: "Lock secrets") {}
+            RailActionButton(
+                symbol: isUnlocked ? "lock.open" : "lock.fill",
+                title: isUnlocked ? "Lock secrets" : "Unlock secrets"
+            ) {
+                if isUnlocked {
+                    vault.lock()
+                } else {
+                    selection = .secrets
+                }
+            }
             RailActionButton(symbol: "gearshape", title: "Settings") {}
         }
         .padding(.top, Theme.titleBarInset)
