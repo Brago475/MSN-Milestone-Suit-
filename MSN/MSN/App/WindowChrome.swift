@@ -49,6 +49,7 @@ struct WindowButtonsReader: NSViewRepresentable {
 }
 
 /// Reports when the window enters or leaves full screen.
+/// In full screen the system title bar is hidden, since the pocket shows its own buttons.
 struct FullScreenReader: NSViewRepresentable {
 
     @Binding var isFullScreen: Bool
@@ -77,15 +78,40 @@ struct FullScreenReader: NSViewRepresentable {
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             guard let window else { return }
-            for name in [NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification] {
-                let token = NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
-                    Task { @MainActor in self?.report() }
-                }
-                observers.append(token)
+
+            observe(NSWindow.didEnterFullScreenNotification, on: window) { view in
+                view.setSystemTitleBarHidden(true)
+                view.report()
             }
+            observe(NSWindow.willExitFullScreenNotification, on: window) { view in
+                view.setSystemTitleBarHidden(false)
+            }
+            observe(NSWindow.didExitFullScreenNotification, on: window) { view in
+                view.setSystemTitleBarHidden(false)
+                view.report()
+            }
+
             Task { @MainActor [weak self] in
-                self?.report()
+                guard let self else { return }
+                if self.window?.styleMask.contains(.fullScreen) == true {
+                    self.setSystemTitleBarHidden(true)
+                }
+                self.report()
             }
+        }
+
+        private func observe(_ name: Notification.Name, on window: NSWindow, action: @escaping @MainActor (ReaderView) -> Void) {
+            let token = NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                Task { @MainActor in
+                    if let self { action(self) }
+                }
+            }
+            observers.append(token)
+        }
+
+        /// The strip macOS slides down with the menu bar in full screen.
+        private func setSystemTitleBarHidden(_ hidden: Bool) {
+            window?.standardWindowButton(.closeButton)?.superview?.superview?.isHidden = hidden
         }
 
         private func report() {
