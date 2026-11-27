@@ -6,6 +6,7 @@ import SwiftUI
 struct EditorView: View {
 
     @Environment(LibraryStore.self) private var library
+    @Environment(\.menuBarInset) private var menuBarInset
     let node: FileNode
 
     @State private var document: MarkdownDocument?
@@ -43,8 +44,9 @@ struct EditorView: View {
         return (areaWidth - paperWidth) / 2 >= DocumentDock.width + DocumentDock.margin * 2
     }
 
+    /// The line under the name row: after scrolling, or while the menu bar pushes the top down.
     private var showsEdge: Bool {
-        mode == .page && isScrolled
+        mode == .page && (isScrolled || menuBarInset > 0)
     }
 
     private var surround: Color {
@@ -53,25 +55,33 @@ struct EditorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            EditorToolbar(
-                commands: commands,
-                markdownSize: $fontSize,
-                zoom: $zoom,
-                paper: $paper,
-                margins: $margins,
-                mode: $mode,
-                showsActions: !showsDock
-            )
-            Divider()
+            VStack(spacing: 0) {
+                EditorToolbar(
+                    commands: commands,
+                    markdownSize: $fontSize,
+                    zoom: $zoom,
+                    paper: $paper,
+                    margins: $margins,
+                    mode: $mode,
+                    showsActions: !showsDock
+                )
+                Divider()
+            }
+            .background(Theme.surface)
+            .offset(y: menuBarInset)
+            .zIndex(3)
 
             VStack(spacing: 0) {
                 titleRow
+                    .offset(y: menuBarInset)
+                    .zIndex(2)
                 editorArea
                     .overlay(alignment: .topTrailing) {
                         if showsDock {
                             DocumentDock(mode: $mode)
                                 .padding(.top, 12)
                                 .padding(.trailing, DocumentDock.margin)
+                                .offset(y: menuBarInset)
                                 .transition(.opacity)
                         }
                     }
@@ -110,7 +120,7 @@ struct EditorView: View {
     // MARK: Parts
 
     /// Lined up with the paper in Page view, with the text in Markdown mode.
-    /// Once the page scrolls, a line and soft shadow show the paper sliding under it.
+    /// Its height never changes, so the page below never resizes; only the line and shadow fade.
     @ViewBuilder
     private var titleRow: some View {
         Group {
@@ -125,7 +135,7 @@ struct EditorView: View {
             }
         }
         .padding(.top, 14)
-        .padding(.bottom, showsEdge ? 10 : 4)
+        .padding(.bottom, 8)
         .background(surround)
         .overlay(alignment: .bottom) {
             Rectangle()
@@ -134,7 +144,6 @@ struct EditorView: View {
                 .opacity(showsEdge ? 1 : 0)
         }
         .shadow(color: .black.opacity(showsEdge ? 0.07 : 0), radius: 4, y: 2)
-        .zIndex(1)
         .animation(.easeOut(duration: 0.15), value: showsEdge)
     }
 

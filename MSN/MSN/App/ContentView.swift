@@ -9,17 +9,23 @@ struct ContentView: View {
     @State private var selection: AppSection = .files
     @State private var pocket = CGSize(width: 78, height: 38)
     @State private var isFullScreen = false
+    @State private var menuBarInset: CGFloat = 0
 
     var body: some View {
         HStack(spacing: 0) {
-            IconRail(
-                selection: $selection,
-                topInset: pocket.height + 12,
-                width: max(Theme.railWidth, pocket.width)
-            )
-            Rectangle()
-                .fill(Theme.hairline)
-                .frame(width: 1)
+            HStack(spacing: 0) {
+                IconRail(
+                    selection: $selection,
+                    topInset: pocket.height + 12,
+                    width: max(Theme.railWidth, pocket.width)
+                )
+                Rectangle()
+                    .fill(Theme.hairline)
+                    .frame(width: 1)
+            }
+            .offset(y: menuBarInset)
+            .zIndex(1)
+
             sectionView
                 .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -37,9 +43,11 @@ struct ContentView: View {
                         .transition(.opacity)
                 }
             }
+            .offset(y: menuBarInset)
         }
+        .environment(\.menuBarInset, menuBarInset)
         .background(WindowButtonsReader(size: $pocket))
-        .background(FullScreenReader(isFullScreen: $isFullScreen))
+        .background(FullScreenReader(isFullScreen: $isFullScreen, menuBarInset: $menuBarInset))
         .ignoresSafeArea(.container, edges: .top)
         .frame(minWidth: Self.minimumSize.width, minHeight: Self.minimumSize.height)
     }
