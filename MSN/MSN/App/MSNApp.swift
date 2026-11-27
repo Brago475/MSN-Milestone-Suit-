@@ -27,7 +27,11 @@ struct MSNApp: App {
                 .environment(library)
         }
         .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentMinSize)
         .defaultSize(width: 1280, height: 820)
+        .commands {
+            TabCommands(library: library)
+        }
 
         Settings {
             SettingsView()

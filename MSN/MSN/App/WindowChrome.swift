@@ -29,6 +29,7 @@ struct WindowButtonsReader: NSViewRepresentable {
 
         private func measure() {
             guard let window,
+                  !window.styleMask.contains(.fullScreen),
                   let content = window.contentView,
                   let close = window.standardWindowButton(.closeButton),
                   let zoom = window.standardWindowButton(.zoomButton) else { return }
@@ -43,6 +44,52 @@ struct WindowButtonsReader: NSViewRepresentable {
             let height = (bottom + top).rounded()
             guard width > 0, height > 0 else { return }
             onMeasure?(CGSize(width: width, height: height))
+        }
+    }
+}
+
+/// Reports when the window enters or leaves full screen.
+struct FullScreenReader: NSViewRepresentable {
+
+    @Binding var isFullScreen: Bool
+
+    func makeNSView(context: Context) -> ReaderView {
+        let view = ReaderView()
+        view.onChange = { value in
+            if value != isFullScreen { isFullScreen = value }
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: ReaderView, context: Context) {}
+
+    final class ReaderView: NSView {
+
+        var onChange: ((Bool) -> Void)?
+        private var observers: [NSObjectProtocol] = []
+
+        override func viewWillMove(toWindow newWindow: NSWindow?) {
+            super.viewWillMove(toWindow: newWindow)
+            observers.forEach { NotificationCenter.default.removeObserver($0) }
+            observers.removeAll()
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let window else { return }
+            for name in [NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification] {
+                let token = NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                    Task { @MainActor in self?.report() }
+                }
+                observers.append(token)
+            }
+            Task { @MainActor [weak self] in
+                self?.report()
+            }
+        }
+
+        private func report() {
+            onChange?(window?.styleMask.contains(.fullScreen) ?? false)
         }
     }
 }

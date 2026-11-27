@@ -4,7 +4,7 @@ extension Notification.Name {
     nonisolated static let msnFocusSearch = Notification.Name("msnFocusSearch")
 }
 
-/// Shown when no file is selected: today, recent notes as a paper stack, and shortcuts.
+/// Shown when no tab is open: today, recent notes as a paper stack, and shortcuts.
 struct WelcomeView: View {
 
     @Environment(LibraryStore.self) private var library
@@ -164,7 +164,7 @@ struct WelcomeView: View {
                     .onHover { inside in
                         if inside { hover(node) }
                     }
-                    .onTapGesture { open(node) }
+                    .onTapGesture { library.openInTab(node) }
                     .help("Open \(title(of: node))")
             }
         }
@@ -302,21 +302,9 @@ struct WelcomeView: View {
         }
     }
 
-    /// Opens a note and expands its folders in the sidebar.
-    private func open(_ node: FileNode) {
-        if let rootKey = library.rootURL?.fileKey {
-            var parent = node.url.deletingLastPathComponent()
-            while parent.fileKey.hasPrefix(rootKey + "/") {
-                library.expanded.insert(parent.fileKey)
-                parent = parent.deletingLastPathComponent()
-            }
-        }
-        library.selection = node.id
-    }
-
     private func newNote() {
         do {
-            _ = try library.createNote(in: library.rootURL)
+            library.renameRequest = try library.createNoteInTab(in: library.rootURL, newTab: true)
         } catch {
             library.lastError = error.localizedDescription
         }

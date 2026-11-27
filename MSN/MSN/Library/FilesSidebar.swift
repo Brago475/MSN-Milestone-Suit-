@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// The Files sidebar: header actions, search, and the folder tree with drag and drop.
@@ -221,6 +222,10 @@ struct FilesSidebar: View {
     @ViewBuilder
     private func menu(for node: FileNode?) -> some View {
         let folder = node.map { folder(for: $0) } ?? library.rootURL
+        if let node, !node.isFolder {
+            Button("Open in New Tab") { library.openInTab(node, newTab: true) }
+            Divider()
+        }
         Button("New File") { newFile(in: folder) }
         Button("New Folder") { newFolder(in: folder) }
         if let node {
@@ -272,16 +277,19 @@ struct FilesSidebar: View {
 
     // MARK: Actions
 
+    /// Folders open and close. Files open in the current tab, or a new tab with ⌘.
     private func select(_ node: FileNode) {
-        library.selection = node.id
         if node.isFolder {
+            library.selection = node.id
             library.toggle(node)
+        } else {
+            library.openInTab(node, newTab: NSEvent.modifierFlags.contains(.command))
         }
     }
 
     private func newFile(in folder: URL?) {
         perform {
-            let url = try library.createNote(in: folder)
+            let url = try library.createNoteInTab(in: folder, newTab: true)
             beginRename(url)
         }
     }

@@ -6,6 +6,9 @@ final class PageTextView: NSTextView, NSLayoutManagerDelegate {
 
     static let topGap: CGFloat = 32
 
+    /// Thin line around each page.
+    private static let pageOutline = NSColor(srgbRed: 0xB9 / 255, green: 0xBE / 255, blue: 0xC7 / 255, alpha: 1)
+
     var pageLayout = PageLayout() {
         didSet {
             if pageLayout != oldValue { applyPageLayout() }
@@ -29,6 +32,10 @@ final class PageTextView: NSTextView, NSLayoutManagerDelegate {
             width: pageLayout.width,
             height: pageLayout.height
         )
+    }
+
+    private func isOnPage(_ point: NSPoint) -> Bool {
+        (0..<pageCount).contains { pageRect($0).contains(point) }
     }
 
     // MARK: Layout
@@ -70,6 +77,7 @@ final class PageTextView: NSTextView, NSLayoutManagerDelegate {
         if pages != pageCount {
             pageCount = pages
             needsDisplay = true
+            window?.invalidateCursorRects(for: self)
             let callback = onPageCount
             DispatchQueue.main.async { callback?(pages) }
         }
@@ -132,6 +140,33 @@ final class PageTextView: NSTextView, NSLayoutManagerDelegate {
         }
     }
 
+    // MARK: Cursor
+
+    /// Text cursor over the paper only. The gray area around it keeps the arrow.
+    override func resetCursorRects() {
+        for index in 0..<pageCount {
+            let rect = pageRect(index).intersection(visibleRect)
+            if !rect.isEmpty {
+                addCursorRect(rect, cursor: .iBeam)
+            }
+        }
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        if !isOnPage(convert(event.locationInWindow, from: nil)) {
+            NSCursor.arrow.set()
+        }
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        if isOnPage(convert(event.locationInWindow, from: nil)) {
+            super.cursorUpdate(with: event)
+        } else {
+            NSCursor.arrow.set()
+        }
+    }
+
     // MARK: Drawing
 
     override func drawBackground(in rect: NSRect) {
@@ -149,13 +184,18 @@ final class PageTextView: NSTextView, NSLayoutManagerDelegate {
 
             NSGraphicsContext.saveGraphicsState()
             let shadow = NSShadow()
-            shadow.shadowBlurRadius = 16
-            shadow.shadowOffset = NSSize(width: 0, height: -4)
-            shadow.shadowColor = NSColor.black.withAlphaComponent(0.16)
+            shadow.shadowBlurRadius = 4
+            shadow.shadowOffset = NSSize(width: 0, height: -1)
+            shadow.shadowColor = NSColor.black.withAlphaComponent(0.08)
             shadow.set()
             NSColor.white.setFill()
             page.fill()
             NSGraphicsContext.restoreGraphicsState()
+
+            let outline = NSBezierPath(rect: page.insetBy(dx: 0.5, dy: 0.5))
+            outline.lineWidth = 1
+            Self.pageOutline.setStroke()
+            outline.stroke()
 
             let number = "\(index + 1)" as NSString
             let size = number.size(withAttributes: numberAttributes)

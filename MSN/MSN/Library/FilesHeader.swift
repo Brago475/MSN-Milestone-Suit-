@@ -116,7 +116,7 @@ struct FilesFooter: View {
     }
 }
 
-/// Shows or hides the Files panel. Shared by the Files header, the page header and the welcome screen.
+/// Shows or hides the Files panel. Shared by the Files header, the tab bar and the welcome screen.
 struct FilesPanelButton: View {
 
     @AppStorage("filesPanelVisible") private var panelVisible = true

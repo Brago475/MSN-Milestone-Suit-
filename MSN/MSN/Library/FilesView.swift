@@ -2,17 +2,11 @@ import AppKit
 import Combine
 import SwiftUI
 
-/// The Files section: vault header, sidebar tree, footer and file preview. The panel can be hidden.
+/// The Files section: vault header, sidebar tree, footer, tabs and the open file. The panel can be hidden.
 struct FilesView: View {
 
     @Environment(LibraryStore.self) private var library
     @AppStorage("filesPanelVisible") private var panelVisible = true
-
-    /// Editors show their own show button in the page header.
-    private var editorIsOpen: Bool {
-        guard let kind = library.selectedNode?.kind else { return false }
-        return kind == .markdown || kind == .text
-    }
 
     var body: some View {
         if library.hasLibrary {
@@ -31,14 +25,20 @@ struct FilesView: View {
                         .frame(width: 1)
                 }
 
-                FilePreview(node: library.selectedNode)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .overlay(alignment: .topLeading) {
-                        if !panelVisible && !editorIsOpen {
-                            FilesPanelButton()
-                                .padding(14)
-                        }
+                VStack(spacing: 0) {
+                    if !library.tabs.isEmpty {
+                        TabStrip()
                     }
+                    FilePreview(node: library.activeNode)
+                        .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .frame(minWidth: 0, maxWidth: .infinity)
+                .overlay(alignment: .topLeading) {
+                    if !panelVisible && library.tabs.isEmpty {
+                        FilesPanelButton()
+                            .padding(14)
+                    }
+                }
             }
             .background {
                 Button("") {

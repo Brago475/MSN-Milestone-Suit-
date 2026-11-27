@@ -9,6 +9,7 @@ struct PageEditor: NSViewRepresentable {
     let zoom: Double
     let pageLayout: PageLayout
     var onPageCount: (Int) -> Void
+    var onScroll: (Bool) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(document: document, controller: controller)
@@ -24,6 +25,7 @@ struct PageEditor: NSViewRepresentable {
         scrollView.backgroundColor = PageStyle.surround
         scrollView.allowsMagnification = true
         scrollView.postsFrameChangedNotifications = true
+        scrollView.contentView.postsBoundsChangedNotifications = true
 
         let storage = NSTextStorage()
         let layoutManager = NSLayoutManager()
@@ -70,6 +72,7 @@ struct PageEditor: NSViewRepresentable {
         scrollView.documentView = textView
         context.coordinator.scrollView = scrollView
         context.coordinator.zoom = zoom
+        context.coordinator.onScroll = onScroll
         context.coordinator.load(document.text, into: textView)
         controller.textView = textView
         controller.updateState()
@@ -79,6 +82,12 @@ struct PageEditor: NSViewRepresentable {
             selector: #selector(Coordinator.frameChanged(_:)),
             name: NSView.frameDidChangeNotification,
             object: scrollView
+        )
+        NotificationCenter.default.addObserver(
+            context.coordinator,
+            selector: #selector(Coordinator.boundsChanged(_:)),
+            name: NSView.boundsDidChangeNotification,
+            object: scrollView.contentView
         )
         DispatchQueue.main.async {
             context.coordinator.applyZoom()
@@ -100,6 +109,7 @@ struct PageEditor: NSViewRepresentable {
         controller.textView = textView
         textView.onPageCount = onPageCount
         context.coordinator.document = document
+        context.coordinator.onScroll = onScroll
 
         if textView.pageLayout != pageLayout {
             textView.pageLayout = pageLayout
@@ -123,6 +133,8 @@ struct PageEditor: NSViewRepresentable {
         var zoom: Double = 1
         var frontMatter: String?
         var lastMarkdown = ""
+        var onScroll: (Bool) -> Void = { _ in }
+        private var isScrolled = false
 
         init(document: MarkdownDocument, controller: PageController) {
             self.document = document
@@ -157,6 +169,15 @@ struct PageEditor: NSViewRepresentable {
 
         @objc func frameChanged(_ notification: Notification) {
             applyZoom()
+        }
+
+        /// Reports only when the page moves away from the top or back to it.
+        @objc func boundsChanged(_ notification: Notification) {
+            guard let scrollView else { return }
+            let scrolled = scrollView.contentView.bounds.minY > 2
+            guard scrolled != isScrolled else { return }
+            isScrolled = scrolled
+            onScroll(scrolled)
         }
 
         func textDidChange(_ notification: Notification) {

@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import Observation
 
-/// The open vault folder, its file tree, and file actions.
+/// The open vault folder, its file tree, open tabs, and file actions.
 @MainActor
 @Observable
 final class LibraryStore {
@@ -43,6 +43,13 @@ final class LibraryStore {
     }
     var lastError: String?
 
+    /// Open files as tabs, by file key, in order.
+    var tabs: [String] = []
+    /// The tab showing in the page area.
+    var activeTab: String?
+    /// A file waiting for a name from the tab bar.
+    var renameRequest: URL?
+
     private var isAccessing = false
     private let fileManager = FileManager.default
 
@@ -56,6 +63,7 @@ final class LibraryStore {
     var hasLibrary: Bool { rootURL != nil }
     var libraryName: String { rootURL?.lastPathComponent ?? "" }
     var selectedNode: FileNode? { selection.flatMap { index[$0] } }
+    var activeNode: FileNode? { activeTab.flatMap { index[$0] } }
 
     /// Where new items go: the selected folder, the selected file's folder, or the root.
     var targetFolder: URL? {
@@ -92,7 +100,7 @@ final class LibraryStore {
         return folder
     }
 
-    /// Opens a known vault.
+    /// Opens a known vault and brings back its tabs.
     func open(_ record: VaultRecord) throws {
         guard let resolved = VaultRegistry.resolve(record) else { throw LibraryError.missing }
 
@@ -115,7 +123,10 @@ final class LibraryStore {
         VaultRegistry.currentID = record.id
         selection = nil
         expanded = []
+        tabs = []
+        activeTab = nil
         reload()
+        restoreTabs()
     }
 
     private func stopAccess() {
@@ -145,6 +156,8 @@ final class LibraryStore {
         guard let rootURL else {
             nodes = []
             index = [:]
+            tabs = []
+            activeTab = nil
             return
         }
         nodes = scan(rootURL)
@@ -162,6 +175,7 @@ final class LibraryStore {
         if let selection, map[selection] == nil {
             self.selection = nil
         }
+        pruneTabs()
     }
 
     private func scan(_ folder: URL) -> [FileNode] {
@@ -223,7 +237,7 @@ final class LibraryStore {
         expanded.removeAll()
     }
 
-    private func expandAncestors(of url: URL) {
+    func expandAncestors(of url: URL) {
         guard let rootKey = rootURL?.fileKey else { return }
         var parent = url.deletingLastPathComponent()
         while parent.fileKey.hasPrefix(rootKey) && parent.fileKey != rootKey {
@@ -407,7 +421,7 @@ final class LibraryStore {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
-    /// Updates selection and open folders after an item moves.
+    /// Updates selection, open folders and tabs after an item moves.
     private func remapKeys(from oldKey: String, to newKey: String) {
         func remap(_ key: String) -> String {
             if key == oldKey { return newKey }
@@ -416,6 +430,9 @@ final class LibraryStore {
         }
         expanded = Set(expanded.map(remap))
         selection = selection.map(remap)
+        tabs = tabs.map(remap)
+        activeTab = activeTab.map(remap)
+        saveTabs()
     }
 
     private func uniqueURL(named base: String, pathExtension: String?, in folder: URL) -> URL {
